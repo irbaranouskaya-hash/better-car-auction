@@ -14,13 +14,14 @@ import {
   createPaginatedResponse
 } from "../utils/query.utils.js";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
+import { UserRole } from "../models/User.model.js";
 
 export const createCar = async (req: AuthRequest, res: Response) => {
   try {
-    const {VIN, odometerValue, year, exteriorColor, interiorColor, haveScratches, haveMalfunctions, haveElectricFailures} = req.body;
+    const {VIN, odometerValue, year, exteriorColor, interiorColor, haveStrongScratches, haveSmallScratches, haveMalfunctions, haveElectricFailures} = req.body;
 
     if(!VIN || !odometerValue || !year || !exteriorColor || !interiorColor || 
-       haveScratches === undefined || haveMalfunctions === undefined || haveElectricFailures === undefined) {
+       haveStrongScratches === undefined || haveSmallScratches === undefined || haveMalfunctions === undefined || haveElectricFailures === undefined) {
       return sendErrorResponse(res, 400, "All fields are required");
     }
 
@@ -35,7 +36,8 @@ export const createCar = async (req: AuthRequest, res: Response) => {
       year,
       exteriorColor,
       interiorColor,
-      haveScratches,
+      haveStrongScratches,
+      haveSmallScratches,
       haveMalfunctions,
       haveElectricFailures,
       userId: req.userId,
@@ -53,7 +55,8 @@ export const getCar = async (req: Request, res: Response) => {
     
     if (!validateIdParam(id, res, "car")) return;
     
-    const car = await Car.findById(id);
+    const car = await Car.findById(id)
+      .populate("userId", "name email");
     if (!car) {
       return sendErrorResponse(res, 404, "Car not found");
     }
@@ -78,6 +81,17 @@ export const deleteCar = async (req: AuthRequest, res: Response) => {
     if (car.userId.toString() !== req.userId) {
       return sendErrorResponse(res, 403, "You are not authorized to delete this car...");
     }
+    
+    const isOwner = car.userId.toString() === req.userId;
+    const isAdmin = req.userRole === UserRole.ADMIN;
+    
+    if (!isOwner && !isAdmin) {
+      return sendErrorResponse(
+        res, 
+        403, 
+        "You are not authorized to delete this car. Only the owner or admin can delete it."
+      );
+    }
 
     await Car.findByIdAndDelete(id);
     
@@ -93,7 +107,7 @@ export const updateCar = async (req: AuthRequest, res: Response) => {
 
     if (!validateIdParam(id, res, "car")) return;
 
-    const { VIN, odometerValue, year, exteriorColor, interiorColor, haveScratches, haveMalfunctions, haveElectricFailures } = req.body;
+    const { VIN, odometerValue, year, exteriorColor, interiorColor, haveStrongScratches, haveSmallScratches, haveMalfunctions, haveElectricFailures } = req.body;
 
     const existingCar = await Car.findById(id);
 
@@ -108,7 +122,7 @@ export const updateCar = async (req: AuthRequest, res: Response) => {
     }
 
     if (!VIN && !odometerValue && !year && !exteriorColor && !interiorColor && 
-        haveScratches === undefined && haveMalfunctions === undefined && haveElectricFailures === undefined) {
+        haveStrongScratches === undefined && haveSmallScratches === undefined && haveMalfunctions === undefined && haveElectricFailures === undefined) {
       return sendErrorResponse(res, 400, "At least one field is required for update");
     }
 
@@ -125,13 +139,14 @@ export const updateCar = async (req: AuthRequest, res: Response) => {
     if (year) updateData.year = year;
     if (exteriorColor) updateData.exteriorColor = exteriorColor;
     if (interiorColor) updateData.interiorColor = interiorColor;
-    if (haveScratches !== undefined) updateData.haveScratches = haveScratches;
+    if (haveStrongScratches !== undefined) updateData.haveStrongScratches = haveStrongScratches;
+    if (haveSmallScratches !== undefined) updateData.haveSmallScratches = haveSmallScratches;
     if (haveMalfunctions !== undefined) updateData.haveMalfunctions = haveMalfunctions;
     if (haveElectricFailures !== undefined) updateData.haveElectricFailures = haveElectricFailures;
 
     const car = await Car.findByIdAndUpdate(id, updateData, { 
-      new: true, // Вернуть обновленный документ
-      runValidators: true // Запустить валидаторы схемы
+      new: true,
+      runValidators: true
     });
 
     if (!car) {
@@ -146,13 +161,10 @@ export const updateCar = async (req: AuthRequest, res: Response) => {
 
 export const getAllCars = async (req: Request, res: Response) => {
   try {
-    // Построение фильтров
     const filters = buildCarFilters(req.query);
 
-    // Параметры пагинации
     const pagination = getPaginationParams(req.query, 10, 100);
 
-    // Параметры сортировки (только разрешенные поля)
     const allowedSortFields = [
       "VIN",
       "odometerValue",
@@ -164,14 +176,13 @@ export const getAllCars = async (req: Request, res: Response) => {
     ];
     const { sortField, sortOrder } = getSortParams(req.query, allowedSortFields);
 
-    // Получение общего количества для пагинации
     const total = await Car.countDocuments(filters);
 
     const cars = await Car.find(filters)
       .sort({ [sortField]: sortOrder })
       .skip(pagination.skip)
       .limit(pagination.limit)
-      .populate("userId", "name email"); // Популяция пользователя
+      .populate("userId", "name email");
 
     const response = createPaginatedResponse(cars, total, pagination);
 

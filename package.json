@@ -8,7 +8,8 @@
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "create-admin": "tsx src/scripts/createAdmin.ts"
   },
   "author": "Iryna Baranouskaya",
   "license": "ISC",

@@ -1,6 +1,8 @@
 import { type Request, type Response } from "express";
-import User from "../models/User.model.js";
+import User, { UserRole } from "../models/User.model.js";
 import jwt from "jsonwebtoken";
+import type { AuthRequest } from "../middleware/auth.middleware.js";
+import { sendErrorResponse } from "../utils/validation.utils.js";
 
 
 const generateToken = (userId: string): string => {
@@ -119,9 +121,25 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
   });
 };
 
-export const deleteUser = async (req: Request, res: Response): Promise<void> => {
+export const deleteUser = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+
+    const targetUser = await User.findById(id);
+    if (!targetUser) {
+      return sendErrorResponse(res, 404, "User not found");
+    }
+
+    const isTargetUser = targetUser._id.toString() === req.userId;
+    const isAdmin = req.userRole === UserRole.ADMIN;
+    
+    if (!isTargetUser && !isAdmin) {
+      return sendErrorResponse(
+        res, 
+        403, 
+        "You are not authorized to delete this user. Only the user himself or admin can delete his account."
+      );
+    }
 
     const user = await User.findByIdAndDelete(id);
 
@@ -142,6 +160,131 @@ export const deleteUser = async (req: Request, res: Response): Promise<void> => 
     res.status(500).json({ 
       success: false,
       message: "Server error" 
+    });
+  }
+};
+
+export const assignAdminRole = async (req: AuthRequest, res: Response) => {
+  try {
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required"
+      });
+    }
+
+    if (req.userRole !== UserRole.ADMIN) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. Only admins can assign admin role."
+      });
+    }
+
+    const targetUser = await User.findById(userId);
+    
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    if (targetUser.role === UserRole.ADMIN) {
+      return res.status(400).json({
+        success: false,
+        message: "User is already an admin"
+      });
+    }
+
+    targetUser.role = UserRole.ADMIN;
+    await targetUser.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Admin role assigned successfully",
+      data: {
+        user: {
+          id: targetUser._id,
+          name: targetUser.name,
+          email: targetUser.email,
+          role: targetUser.role
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Assign admin role error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error
+    });
+  }
+};
+
+export const revokeAdminRole = async (req: AuthRequest, res: Response) => {
+  try {
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required"
+      });
+    }
+
+    if (req.userRole !== UserRole.ADMIN) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. Only admins can revoke admin role."
+      });
+    }
+
+    const targetUser = await User.findById(userId);
+    
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    if (targetUser._id.toString() === req.userId) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot revoke your own admin role"
+      });
+    }
+
+    if (targetUser.role !== UserRole.ADMIN) {
+      return res.status(400).json({
+        success: false,
+        message: "User is not an admin"
+      });
+    }
+
+    targetUser.role = UserRole.USER;
+    await targetUser.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Admin role revoked successfully",
+      data: {
+        user: {
+          id: targetUser._id,
+          name: targetUser.name,
+          email: targetUser.email,
+          role: targetUser.role
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Revoke admin role error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error
     });
   }
 };
