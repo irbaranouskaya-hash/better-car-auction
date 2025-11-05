@@ -2,7 +2,7 @@ import { type Request, type Response } from "express";
 import User, { UserRole } from "../models/User.model.js";
 import jwt from "jsonwebtoken";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
-import { sendErrorResponse } from "../utils/validation.utils.js";
+import { handleControllerError, sendErrorResponse } from "../utils/validation.utils.js";
 import { generateAccessToken, generateRefreshToken, getRefreshTokenExpiration } from "../utils/token.utils.js";
 
 
@@ -56,11 +56,7 @@ export const register = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Server error during registration" ,
-      error: error
-    });
+    handleControllerError(error, res, "registration");
   }
 }
 
@@ -75,7 +71,6 @@ export const refreshTokens = async (req: Request, res: Response) => {
       });
     }
 
-    // Ищем пользователя с таким refresh token
     const user = await User.findOne({
       'refreshTokens.token': refreshToken
     });
@@ -140,12 +135,7 @@ export const refreshTokens = async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
-    console.error("Refresh token error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error
-    });
+    handleControllerError(error, res, "refresh tokens");
   }
 };
 
@@ -202,11 +192,7 @@ export const login = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Server error during login" ,
-      error: error
-    });
+    handleControllerError(error, res, "login");
   }
 }
 
@@ -276,12 +262,7 @@ export const changePassword = async (req: AuthRequest, res: Response): Promise<v
       data: { accessToken: token, refreshToken: refreshToken }
     });
   } catch (error) {
-    console.error("Change password error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error during password change",
-      error: error
-    });
+    handleControllerError(error, res, "change password");
   }
 };
 
@@ -314,12 +295,7 @@ export const logoutAllDevices = async (req: AuthRequest, res: Response): Promise
       data: { accessToken: token, refreshToken: refreshToken }
     });
   } catch (error) {
-    console.error("Logout all devices error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error
-    });
+    handleControllerError(error, res, "logout all devices");
   }
 };
 
@@ -417,12 +393,7 @@ export const assignAdminRole = async (req: AuthRequest, res: Response) => {
       }
     });
   } catch (error) {
-    console.error("Assign admin role error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error
-    });
+    handleControllerError(error, res, "assign admin role");
   }
 };
 
@@ -463,11 +434,6 @@ export const revokeAdminRole = async (req: AuthRequest, res: Response) => {
       }
     });
   } catch (error) {
-    console.error("Revoke admin role error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error
-    });
+    handleControllerError(error, res, "revoke admin role");
   }
 };

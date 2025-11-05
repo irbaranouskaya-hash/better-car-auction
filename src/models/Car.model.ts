@@ -19,10 +19,10 @@ const carSchema = new Schema({
     ref: 'User',
     required: true
   },
-  VIN: {type: String, required: true, unique: true},
-  odometerValue: {type: Number, required: true},
-  year: {type: Number, required: true},
-  exteriorColor: {type: String, required: true},
+  VIN: {type: String, required: true, unique: true, index: true},
+  odometerValue: {type: Number, required: true, index: true},
+  year: {type: Number, required: true, index: true},
+  exteriorColor: {type: String, required: true, index: true},
   interiorColor: {type: String, required: true},
   haveStrongScratches: {type: Boolean, required: true},
   haveSmallScratches: {type: Boolean, required: true},
@@ -31,6 +31,11 @@ const carSchema = new Schema({
 }, {
   timestamps: true
 });
+
+carSchema.index({ userId: 1, year: -1 });
+carSchema.index({ userId: 1, createdAt: -1 });
+carSchema.index({ year: 1, odometerValue: 1 });
+carSchema.index({ year: 1, createdAt: -1 });
 
 carSchema.virtual("grade").get(function() {
   let grade = GRADE_LIMITS.MAX_GRADE;

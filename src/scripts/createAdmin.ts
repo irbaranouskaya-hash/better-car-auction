@@ -11,7 +11,21 @@ const createAdmin = async () => {
   try {
     await mongoose.connect(config.mongoUri);
     
-    const adminEmail = 'admin@example.com';
+    const adminName = config.admin.name;
+    const adminEmail = config.admin.email;
+    const adminPassword = config.admin.password;
+
+    if (!adminName || !adminEmail || !adminPassword) {
+      console.error('Error: Admin credentials not found in environment variables');
+      console.log('Please set ADMIN_NAME, ADMIN_EMAIL, and ADMIN_PASSWORD in .env file');
+      process.exit(1);
+    }
+
+    if (adminPassword.length < 8) {
+      console.error('Error: ADMIN_PASSWORD must be at least 8 characters long');
+      process.exit(1);
+    }
+
     const existingAdmin = await User.findOne({ email: adminEmail });
     
     if (existingAdmin) {
@@ -20,9 +34,9 @@ const createAdmin = async () => {
     }
     
     const admin = await User.create({
-      name: 'Admin',
+      name: adminName,
       email: adminEmail,
-      password: 'admin123456',
+      password: adminPassword,
       role: UserRole.ADMIN
     });
     

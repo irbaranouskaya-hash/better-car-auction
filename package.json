@@ -19,7 +19,8 @@
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.20.0",
-    "mongoose": "^8.18.3"
+    "mongoose": "^8.18.3",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",

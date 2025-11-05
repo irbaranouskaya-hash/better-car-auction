@@ -1,5 +1,6 @@
-import jwt from 'jsonwebtoken';
+import jwt, { type SignOptions } from 'jsonwebtoken';
 import crypto from 'crypto';
+import { config } from '../config.js';
 
 interface TokenPayload {
   userId: string;
@@ -8,7 +9,7 @@ interface TokenPayload {
 }
 
 export const generateAccessToken = (userId: string, tokenVersion: number): string => {
-  const secret = process.env.JWT_SECRET || 'default_secret';
+  const secret = config.jwt.secret;
   
   return jwt.sign(
     { 
@@ -17,7 +18,9 @@ export const generateAccessToken = (userId: string, tokenVersion: number): strin
       type: 'access'
     } as TokenPayload, 
     secret, 
-    { expiresIn: '1h' } // 1 час
+    {
+      expiresIn: config.jwt.accessTokenExpiry
+    } as SignOptions
   );
 };
 
@@ -27,7 +30,7 @@ export const generateRefreshToken = (): string => {
 
 export const verifyAccessToken = (token: string): TokenPayload | null => {
   try {
-    const secret = process.env.JWT_SECRET || 'default_secret';
+    const secret = config.jwt.secret;
     const decoded = jwt.verify(token, secret) as TokenPayload;
     
     if (decoded.type !== 'access') {
@@ -42,5 +45,5 @@ export const verifyAccessToken = (token: string): TokenPayload | null => {
 
 export const getRefreshTokenExpiration = (): Date => {
   const now = new Date();
-  return new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  return new Date(now.getTime() + config.jwt.refreshTokenExpiryDays * 24 * 60 * 60 * 1000);
 };
