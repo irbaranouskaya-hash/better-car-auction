@@ -114,7 +114,6 @@ export const updateCar = async (req: AuthRequest, res: Response) => {
     if (!existingCar) {
       return sendErrorResponse(res, 404, "Car not found");
     }
-    console.log(existingCar.userId.toString(), req.userId);
 
     if (existingCar.userId.toString() !== req.userId) {
       

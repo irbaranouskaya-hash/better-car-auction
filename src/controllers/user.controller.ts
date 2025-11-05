@@ -3,14 +3,8 @@ import User, { UserRole } from "../models/User.model.js";
 import jwt from "jsonwebtoken";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
 import { sendErrorResponse } from "../utils/validation.utils.js";
+import { generateAccessToken, generateRefreshToken, getRefreshTokenExpiration } from "../utils/token.utils.js";
 
-
-const generateToken = (userId: string): string => {
-  
-  const secret = process.env.JWT_SECRET || "default_secret";
-
-  return jwt.sign({ userId }, secret, { expiresIn: "7d" });
-}
 
 export const register = async (req: Request, res: Response) => {
   try {
@@ -40,7 +34,14 @@ export const register = async (req: Request, res: Response) => {
 
     const user = await User.create({name, email, password});
     
-    const token = generateToken(user._id.toString());
+    const token = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
+    const refreshToken = generateRefreshToken();
+    user.refreshTokens.push({
+      token: refreshToken,
+      createdAt: new Date(),
+      expiresAt: getRefreshTokenExpiration(),
+    });
+    await user.save();
 
     res.status(201).json({
       success: true,
@@ -62,6 +63,92 @@ export const register = async (req: Request, res: Response) => {
     });
   }
 }
+
+export const refreshTokens = async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Refresh token is required"
+      });
+    }
+
+    // Ищем пользователя с таким refresh token
+    const user = await User.findOne({
+      'refreshTokens.token': refreshToken
+    });
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid refresh token"
+      });
+    }
+
+    const tokenData = user.refreshTokens?.find(
+      rt => rt.token === refreshToken
+    );
+
+    if (!tokenData) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid refresh token"
+      });
+    }
+
+    if (tokenData.expiresAt < new Date()) {
+      user.refreshTokens = (user.refreshTokens?.filter(
+        rt => rt.token !== refreshToken
+      ) as any) || [];
+      await user.save();
+
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token expired. Please login again."
+      });
+    }
+
+    const newAccessToken = generateAccessToken(
+      user._id.toString(), 
+      user.tokenVersion || 0
+    );
+    const newRefreshToken = generateRefreshToken();
+
+    user.refreshTokens = (user.refreshTokens?.filter(
+      rt => rt.token !== refreshToken
+    ) as any) || [];
+    
+    user.refreshTokens.push({
+      token: newRefreshToken,
+      createdAt: new Date(),
+      expiresAt: getRefreshTokenExpiration(),
+      deviceInfo: req.headers['user-agent'] || 'Unknown',
+      ipAddress: req.ip || req.socket.remoteAddress || 'Unknown'
+    });
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Tokens refreshed successfully",
+      data: {
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+        expiresIn: 3600
+      }
+    });
+  } catch (error) {
+    console.error("Refresh token error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error
+    });
+  }
+};
+
 
 export const login = async (req: Request, res: Response) => {
   try {
@@ -92,7 +179,15 @@ export const login = async (req: Request, res: Response) => {
       return;
     }
 
-    const token = generateToken(user._id.toString());
+    const token = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
+    const refreshToken = generateRefreshToken();
+    user.refreshTokens.push({
+      token: refreshToken,
+      createdAt: new Date(),
+      expiresAt: getRefreshTokenExpiration(),
+    });
+    await user.save();
+
     res.status(200).json({
       success: true,
       message: "Login successful",
@@ -102,7 +197,8 @@ export const login = async (req: Request, res: Response) => {
           name: user.name,
           email: user.email,
         },
-        token,
+        accessToken: token,
+        refreshToken: refreshToken,
       },
     });
   } catch (error) {
@@ -119,6 +215,112 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
     success: true,
     message: "Logout successful. Please remove token from client.",
   });
+};
+
+export const changePassword = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      res.status(400).json({
+        success: false,
+        message: "Current password and new password are required"
+      });
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      res.status(400).json({
+        success: false,
+        message: "New password must be at least 8 characters long"
+      });
+      return;
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+      return;
+    }
+
+    // @ts-expect-error: comparePassword is a custom method defined on the User schema
+    const isPasswordValid = await user.comparePassword(currentPassword);
+    if (!isPasswordValid) {
+      res.status(401).json({
+        success: false,
+        message: "Current password is incorrect"
+      });
+      return;
+    }
+
+    user.password = newPassword;
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
+    user.passwordChangedAt = new Date();
+    await user.save();
+
+    const token = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
+    const refreshToken = generateRefreshToken();
+    user.refreshTokens.push({
+      token: refreshToken,
+      createdAt: new Date(),
+      expiresAt: getRefreshTokenExpiration(),
+    });
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Password changed successfully. All other sessions have been logged out.",
+      data: { accessToken: token, refreshToken: refreshToken }
+    });
+  } catch (error) {
+    console.error("Change password error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error during password change",
+      error: error
+    });
+  }
+};
+
+export const logoutAllDevices = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+      return;
+    }
+
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
+    await user.save();
+
+    const token = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
+    const refreshToken = generateRefreshToken();
+    user.refreshTokens.push({
+      token: refreshToken,
+      createdAt: new Date(),
+      expiresAt: getRefreshTokenExpiration(),
+    });
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Logged out from all devices successfully. Use new token for future requests.",
+      data: { accessToken: token, refreshToken: refreshToken }
+    });
+  } catch (error) {
+    console.error("Logout all devices error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error
+    });
+  }
 };
 
 export const deleteUser = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -164,32 +366,33 @@ export const deleteUser = async (req: AuthRequest, res: Response): Promise<void>
   }
 };
 
+const validateTargetUser = async (
+  req: AuthRequest,
+  res: Response
+): Promise<{ targetUser: any } | null> => {
+  const { userId } = req.body;
+  
+  if (!userId) {
+    sendErrorResponse(res, 400, "User ID is required");
+    return null;
+  }
+
+  const targetUser = await User.findById(userId);
+  
+  if (!targetUser) {
+    sendErrorResponse(res, 404, "User not found");
+    return null;
+  }
+
+  return { targetUser };
+};
+
 export const assignAdminRole = async (req: AuthRequest, res: Response) => {
   try {
-    const { userId } = req.body;
+    const validation = await validateTargetUser(req, res);
+    if (!validation) return;
     
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: "User ID is required"
-      });
-    }
-
-    if (req.userRole !== UserRole.ADMIN) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. Only admins can assign admin role."
-      });
-    }
-
-    const targetUser = await User.findById(userId);
-    
-    if (!targetUser) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found"
-      });
-    }
+    const { targetUser } = validation;
 
     if (targetUser.role === UserRole.ADMIN) {
       return res.status(400).json({
@@ -225,30 +428,10 @@ export const assignAdminRole = async (req: AuthRequest, res: Response) => {
 
 export const revokeAdminRole = async (req: AuthRequest, res: Response) => {
   try {
-    const { userId } = req.body;
+    const validation = await validateTargetUser(req, res);
+    if (!validation) return;
     
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: "User ID is required"
-      });
-    }
-
-    if (req.userRole !== UserRole.ADMIN) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. Only admins can revoke admin role."
-      });
-    }
-
-    const targetUser = await User.findById(userId);
-    
-    if (!targetUser) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found"
-      });
-    }
+    const { targetUser } = validation;
 
     if (targetUser._id.toString() === req.userId) {
       return res.status(400).json({

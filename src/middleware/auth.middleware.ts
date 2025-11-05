@@ -27,7 +27,8 @@ export const authenticate = async (
     const secret = process.env.JWT_SECRET || "default_secret";
     
     try {
-      const decoded = jwt.verify(token, secret) as { userId: string };
+      const decoded = jwt.verify(token, secret) as { userId: string, tokenVersion?: number, iat?: number };
+
       const user = await User.findById(decoded.userId);
       
       if (!user) {
@@ -37,7 +38,28 @@ export const authenticate = async (
         });
         return;
       }
-      
+
+      if (decoded.tokenVersion !== undefined && decoded.tokenVersion !== user.tokenVersion) {
+        res.status(401).json({
+          success: false,
+          message: "Token has been invalidated. Please login again.",
+        });
+        return;
+      }
+
+      if (user.passwordChangedAt) {
+        const tokenIssuedAt = decoded.iat! * 1000;
+        const passwordChangedTime = user.passwordChangedAt.getTime();
+        
+        if (passwordChangedTime > tokenIssuedAt) {
+          res.status(401).json({
+            success: false,
+            message: "Password was changed. Please login again.",
+          });
+          return;
+        }
+      }
+    
       req.userId = decoded.userId;
       req.userRole = user.role as UserRole;
       

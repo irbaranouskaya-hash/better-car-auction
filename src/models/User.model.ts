@@ -14,7 +14,16 @@ const userSchema = new Schema({
     type: String,
     enum: Object.values(UserRole),
     default: UserRole.USER,
-  }
+  },
+
+  refreshTokens: [{
+    token: {type: String, required: true},
+    createdAt: {type: Date, default: Date.now},
+    expiresAt: {type: Date, required: true},
+  }],
+  
+  passwordChangedAt: {type: Date},
+  tokenVersion: {type: Number, default: 0},
 }, {timestamps: true});
 
 userSchema.pre('save', async function (next) {
