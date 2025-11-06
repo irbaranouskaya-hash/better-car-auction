@@ -161,3 +161,33 @@ export const getAllCars = async (req: Request, res: Response) => {
     handleControllerError(error, res, "cars retrieval");
   }
 }
+
+export const calculateCarPrice = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    
+    if (!validateIdParam(id, res, "car")) return;
+    
+    const car = await Car.findById(id);
+    if (!car) {
+      return sendErrorResponse(res, 404, "Car not found");
+    }
+    
+    // @ts-expect-error
+    const priceWithMarket = await car.calculatePriceWithMarket();
+    
+    sendSuccessResponse(res, 200, "Price calculated successfully", {
+      car: {
+        id: car._id,
+        VIN: car.VIN,
+        year: car.year,
+        odometerValue: car.odometerValue,
+        msrp: car.msrp,
+      },
+      grade: car.grade,
+      marketAdjustedPrice: priceWithMarket,
+    });
+  } catch (error) {
+    handleControllerError(error, res, "price calculation");
+  }
+};
