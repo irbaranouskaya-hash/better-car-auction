@@ -1,50 +1,43 @@
-import { Router, type Request, type Response } from "express";
+import { Router } from "express";
+import {
+  createAuction,
+  getAuction,
+  getAllAuctions,
+  updateAuction,
+  deleteAuction,
+  getCurrentAuction
+} from "../controllers/auction.controller.js";
+import { authenticate, requireAdmin } from "../middleware/auth.middleware.js";
+import { validate } from "../middleware/validate.middleware.js";
+import { createAuctionSchema, updateAuctionSchema } from "../schemas/auction.schema.js";
 
 const router = Router();
 
+router.get("/", getAllAuctions);
+router.get("/current", getCurrentAuction);
+router.get("/:id", getAuction);
 
-router.post("/", (req: Request, res: Response) => {
-  // TODO: add logic of creating auction
-  res.status(201).json({
-    message: "Auction created successfully",
-    // auction: createdAuction
-  });
-});
+router.post(
+  "/",
+  authenticate,
+  requireAdmin,
+  validate(createAuctionSchema),
+  createAuction
+);
 
+router.patch(
+  "/:id",
+  authenticate,
+  requireAdmin,
+  validate(updateAuctionSchema),
+  updateAuction
+);
 
-router.get("/", (req: Request, res: Response) => {
-  // TODO: add getting all auctions with filtering
-  res.json({
-    message: "Get all auctions",
-    // auctions: []
-  });
-});
-
-router.get("/:id", (req: Request, res: Response) => {
-  const { id } = req.params;
-  // TODO: add getting auction by id
-  res.json({
-    message: `Get auction with id: ${id}`,
-    // auction: foundAuction
-  });
-});
-
-
-router.put("/:id", (req: Request, res: Response) => {
-  const { id } = req.params;
-  // TODO: add updating auction
-  res.json({
-    message: `Update auction with id: ${id}`,
-    // auction: updatedAuction
-  });
-});
-
-router.delete("/:id", (req: Request, res: Response) => {
-  const { id } = req.params;
-  // TODO: add deleting auction
-  res.json({
-    message: `Delete auction with id: ${id}`,
-  });
-});
+router.delete(
+  "/:id",
+  authenticate,
+  requireAdmin,
+  deleteAuction
+);
 
 export default router;
