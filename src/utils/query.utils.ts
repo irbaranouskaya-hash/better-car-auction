@@ -21,51 +21,33 @@ export const getQueryBoolean = (value: any): boolean | undefined => {
   return undefined;
 };
 
-export const buildCarFilters = (query: Request["query"]): Record<string, any> => {
+export const buildCarFilters = (query: any): Record<string, any> => {
   const filters: Record<string, any> = {};
 
-  const userId = getQueryString(query.userId);
-  const VIN = getQueryString(query.VIN);
-  const exteriorColor = getQueryString(query.exteriorColor);
-  const interiorColor = getQueryString(query.interiorColor);
+  if (query.userId) filters.userId = query.userId;
+  if (query.VIN) filters.VIN = query.VIN;
+  if (query.exteriorColor) filters.exteriorColor = query.exteriorColor;
+  if (query.interiorColor) filters.interiorColor = query.interiorColor;
 
-  if (userId) filters.userId = userId;
-  if (VIN) filters.VIN = VIN;
-  if (exteriorColor) filters.exteriorColor = exteriorColor;
-  if (interiorColor) filters.interiorColor = interiorColor;
+  if (query.odometerValue !== undefined) filters.odometerValue = query.odometerValue;
+  if (query.year !== undefined) filters.year = query.year;
 
-  const odometerValue = getQueryNumber(query.odometerValue);
-  const year = getQueryNumber(query.year);
-
-  if (odometerValue !== undefined) filters.odometerValue = odometerValue;
-  if (year !== undefined) filters.year = year;
-
-  const minOdometer = getQueryNumber(query.minOdometer);
-  const maxOdometer = getQueryNumber(query.maxOdometer);
-  const minYear = getQueryNumber(query.minYear);
-  const maxYear = getQueryNumber(query.maxYear);
-
-  if (minOdometer !== undefined || maxOdometer !== undefined) {
+  if (query.minOdometer !== undefined || query.maxOdometer !== undefined) {
     filters.odometerValue = {};
-    if (minOdometer !== undefined) filters.odometerValue.$gte = minOdometer;
-    if (maxOdometer !== undefined) filters.odometerValue.$lte = maxOdometer;
+    if (query.minOdometer !== undefined) filters.odometerValue.$gte = query.minOdometer;
+    if (query.maxOdometer !== undefined) filters.odometerValue.$lte = query.maxOdometer;
   }
 
-  if (minYear !== undefined || maxYear !== undefined) {
+  if (query.minYear !== undefined || query.maxYear !== undefined) {
     filters.year = {};
-    if (minYear !== undefined) filters.year.$gte = minYear;
-    if (maxYear !== undefined) filters.year.$lte = maxYear;
+    if (query.minYear !== undefined) filters.year.$gte = query.minYear;
+    if (query.maxYear !== undefined) filters.year.$lte = query.maxYear;
   }
 
-  const haveStrongScratches = getQueryBoolean(query.haveStrongScratches);
-  const haveSmallScratches = getQueryBoolean(query.haveSmallScratches);
-  const haveMalfunctions = getQueryBoolean(query.haveMalfunctions);
-  const haveElectricFailures = getQueryBoolean(query.haveElectricFailures);
-
-  if (haveStrongScratches !== undefined) filters.haveStrongScratches = haveStrongScratches;
-  if (haveSmallScratches !== undefined) filters.haveSmallScratches = haveSmallScratches;
-  if (haveMalfunctions !== undefined) filters.haveMalfunctions = haveMalfunctions;
-  if (haveElectricFailures !== undefined) filters.haveElectricFailures = haveElectricFailures;
+  if (query.haveStrongScratches !== undefined) filters.haveStrongScratches = query.haveStrongScratches;
+  if (query.haveSmallScratches !== undefined) filters.haveSmallScratches = query.haveSmallScratches;
+  if (query.haveMalfunctions !== undefined) filters.haveMalfunctions = query.haveMalfunctions;
+  if (query.haveElectricFailures !== undefined) filters.haveElectricFailures = query.haveElectricFailures;
 
   return filters;
 };
@@ -104,7 +86,7 @@ export const getSortParams = (
   defaultField: string = "createdAt"
 ): SortParams => {
   const sortBy = getQueryString(query.sortBy) || defaultField;
-  const order = getQueryString(query.order);
+  const order = getQueryString(query.sortOrder) || getQueryString(query.order);
 
   const sortField = allowedFields.length > 0 && !allowedFields.includes(sortBy) 
     ? defaultField 

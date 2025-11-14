@@ -15,7 +15,7 @@ import {
 } from "../utils/query.utils.js";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
 import { UserRole } from "../models/User.model.js";
-import type { CreateCarInput, UpdateCarInput } from "../schemas/car.schema.js";
+import type { CreateCarInput, GetCarsQuery, UpdateCarInput } from "../schemas/car.schema.js";
 
 export const createCar = async (req: AuthRequest, res: Response) => {
   try {
@@ -127,30 +127,26 @@ export const updateCar = async (req: AuthRequest, res: Response) => {
 
 export const getAllCars = async (req: Request, res: Response) => {
   try {
-    const filters = buildCarFilters(req.query);
+    const query = req.query as unknown as GetCarsQuery;
+    
+    const filters = buildCarFilters(query);
 
-    const pagination = getPaginationParams(req.query, 10, 100);
+    const page = query.page || 1;
+    const limit = query.limit || 10;
+    const skip = (page - 1) * limit;
 
-    const allowedSortFields = [
-      "VIN",
-      "odometerValue",
-      "year",
-      "exteriorColor",
-      "interiorColor",
-      "createdAt",
-      "updatedAt"
-    ];
-    const { sortField, sortOrder } = getSortParams(req.query, allowedSortFields);
+    const sortField = query.sortBy || 'createdAt';
+    const sortOrder = query.order === 'asc' ? 1 : -1;
 
     const total = await Car.countDocuments(filters);
 
     const cars = await Car.find(filters)
       .sort({ [sortField]: sortOrder })
-      .skip(pagination.skip)
-      .limit(pagination.limit)
+      .skip(skip)
+      .limit(limit)
       .populate("userId", "name email");
 
-    const response = createPaginatedResponse(cars, total, pagination);
+    const response = createPaginatedResponse(cars, total, { page, limit, skip });
 
     res.status(200).json({
       success: true,
@@ -161,3 +157,33 @@ export const getAllCars = async (req: Request, res: Response) => {
     handleControllerError(error, res, "cars retrieval");
   }
 }
+
+export const calculateCarPrice = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    
+    if (!validateIdParam(id, res, "car")) return;
+    
+    const car = await Car.findById(id);
+    if (!car) {
+      return sendErrorResponse(res, 404, "Car not found");
+    }
+    
+    // @ts-expect-error
+    const priceWithMarket = await car.calculatePriceWithMarket();
+    
+    sendSuccessResponse(res, 200, "Price calculated successfully", {
+      car: {
+        id: car._id,
+        VIN: car.VIN,
+        year: car.year,
+        odometerValue: car.odometerValue,
+        msrp: car.msrp,
+      },
+      grade: car.grade,
+      marketAdjustedPrice: priceWithMarket,
+    });
+  } catch (error) {
+    handleControllerError(error, res, "price calculation");
+  }
+};
