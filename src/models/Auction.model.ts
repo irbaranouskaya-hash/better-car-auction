@@ -6,8 +6,14 @@ export interface IAuctionDocument extends Document {
   endDate: Date;
   createdBy: mongoose.Types.ObjectId;
   isActive: boolean;
+  cars: mongoose.Types.ObjectId[];
   createdAt: Date;
   updatedAt: Date;
+
+  status: 'upcoming' | 'active' | 'ended';
+  durationHours: number;
+  timeUntilStart: number;
+
   isCurrentlyActive(): boolean;
   canBeEdited(): boolean;
 }
@@ -59,6 +65,11 @@ const auctionSchema = new Schema({
     required: true,
     index: true
   },
+
+  cars: [{
+    type: Schema.Types.ObjectId,
+    ref: 'Car'
+  }],
   
   isActive: {
     type: Boolean,

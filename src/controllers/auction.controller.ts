@@ -1,5 +1,7 @@
 import { type Request, type Response } from "express";
 import Auction from "../models/Auction.model.js";
+import Car from "../models/Car.model.js";
+import Bid from "../models/Bid.model.js";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
 import {
   validateIdParam,
@@ -13,7 +15,8 @@ import {
   createPaginatedResponse
 } from "../utils/query.utils.js";
 import type { CreateAuctionInput, UpdateAuctionInput } from "../schemas/auction.schema.js";
-import { Types } from "mongoose";
+import mongoose, { Types } from "mongoose";
+import type { AssignCarsInput } from "../schemas/bid.schema.js";
 
 export const createAuction = async (req: AuthRequest, res: Response) => {
   try {
@@ -205,5 +208,109 @@ export const getCurrentAuction = async (req: Request, res: Response) => {
     sendSuccessResponse(res, 200, "Current auction retrieved successfully", auction);
   } catch (error) {
     handleControllerError(error, res, "current auction retrieval");
+  }
+};
+
+export const assignCarsToAuction = async (req: AuthRequest, res: Response) => {
+  try {
+    const { auctionId } = req.params;
+    const { carIds } = req.body as AssignCarsInput;
+
+    if (!validateIdParam(auctionId, res, "auction")) return;
+
+    const auction = await Auction.findById(auctionId);
+
+    if (!auction) {
+      return sendErrorResponse(res, 404, "Auction not found");
+    }
+
+    if (auction.status !== 'upcoming') {
+      return sendErrorResponse(
+        res,
+        400,
+        `Cannot assign cars to ${auction.status} auction. Only upcoming auctions can be modified.`
+      );
+    }
+
+    const cars = await Car.find({ _id: { $in: carIds } });
+
+    if (cars.length !== carIds.length) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Some cars were not found"
+      );
+    }
+
+    const now = new Date();
+    const conflictingAuctions = await Auction.find({
+      _id: { $ne: auctionId },
+      cars: { $in: carIds },
+      endDate: { $gte: now }
+    });
+
+    if (conflictingAuctions.length > 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        `Some cars are already assigned to other active auctions: ${conflictingAuctions.map(a => a.name).join(', ')}`
+      );
+    }
+
+    const existingCarIds = auction.cars.map(id => id.toString());
+    const newCarIds = carIds.filter(id => !existingCarIds.includes(id));
+
+    auction.cars.push(...newCarIds.map(id => new mongoose.Types.ObjectId(id)));
+    await auction.save();
+
+    await auction.populate('cars');
+
+    sendSuccessResponse(res, 200, "Cars assigned to auction successfully", {
+      auction: {
+        _id: auction._id,
+        name: auction.name,
+        totalCars: auction.cars.length
+      },
+      newlyAssigned: newCarIds.length,
+      cars: auction.cars
+    });
+  } catch (error) {
+    handleControllerError(error, res, "cars assignment");
+  }
+};
+
+export const removeCarFromAuction = async (req: AuthRequest, res: Response) => {
+  try {
+    const { auctionId, carId } = req.params;
+
+    if (!validateIdParam(auctionId, res, "auction")) return;
+    if (!validateIdParam(carId, res, "car")) return;
+
+    const auction = await Auction.findById(auctionId);
+
+    if (!auction) {
+      return sendErrorResponse(res, 404, "Auction not found");
+    }
+
+    if (auction.status !== 'upcoming') {
+      return sendErrorResponse(
+        res,
+        400,
+        `Cannot remove cars from ${auction.status} auction`
+      );
+    }
+
+    auction.cars = auction.cars.filter(id => id.toString() !== carId);
+    await auction.save();
+
+    await Bid.deleteMany({ auctionId, carId });
+
+    sendSuccessResponse(res, 200, "Car removed from auction successfully", {
+      auctionId,
+      carId,
+      remainingCars: auction.cars.length
+    });
+  } catch (error) {
+    handleControllerError(error, res, "car removal");
   }
 };
