@@ -1,10 +1,17 @@
 import express, { type Request, type Response } from "express";
-import { config } from "./config.js";
-import connectDB from "./db.js";
-import routes from "./routes/index.js";
+import { config } from "./config";
+import connectDB from "./db";
+import { connectRedis } from "./redis";
+import routes from "./routes/index";
+import cors from "cors"
 
 const app = express();
 const PORT = config.port;
+
+app.use(cors({
+  origin: config.clientUrl,
+  credentials: true
+}));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -15,7 +22,8 @@ app.get("/", (req: Request, res: Response) => {
 
 app.use("/api", routes);
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Server is running at http://localhost:${PORT}`);
-  connectDB();
+  await connectDB();
+  await connectRedis();
 });

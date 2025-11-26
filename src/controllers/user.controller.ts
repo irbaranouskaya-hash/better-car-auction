@@ -3,7 +3,15 @@ import User, { UserRole } from "../models/User.model.js";
 import jwt from "jsonwebtoken";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
 import { handleControllerError, sendErrorResponse } from "../utils/validation.utils.js";
-import { generateAccessToken, generateRefreshToken, getRefreshTokenExpiration } from "../utils/token.utils.js";
+import { generateAccessToken, getRefreshTokenExpiration } from "../utils/token.utils.js";
+import { 
+  generateRefreshTokenForRedis,
+  saveRefreshToken,
+  verifyRefreshToken,
+  removeRefreshToken,
+  removeAllRefreshTokens,
+  getUserActiveSessions
+} from "../utils/redis-token.utils.js";
 
 
 export const register = async (req: Request, res: Response) => {
@@ -34,14 +42,15 @@ export const register = async (req: Request, res: Response) => {
 
     const user = await User.create({name, email, password});
     
-    const token = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
-    const refreshToken = generateRefreshToken();
-    user.refreshTokens.push({
-      token: refreshToken,
-      createdAt: new Date(),
-      expiresAt: getRefreshTokenExpiration(),
-    });
-    await user.save();
+    const accessToken = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
+    const refreshToken = generateRefreshTokenForRedis();
+    
+    await saveRefreshToken(
+      user._id.toString(),
+      refreshToken,
+      req.headers['user-agent'],
+      req.ip || req.socket.remoteAddress
+    );
 
     res.status(201).json({
       success: true,
@@ -52,7 +61,8 @@ export const register = async (req: Request, res: Response) => {
           name: user.name,
           email: user.email,
         },
-        token,
+        accessToken,
+        refreshToken,
       },
     });
   } catch (error) {
@@ -60,7 +70,7 @@ export const register = async (req: Request, res: Response) => {
   }
 }
 
-export const refreshTokens = async (req: Request, res: Response) => {
+export const refreshTokens = async (req: AuthRequest, res: Response) => {
   try {
     const { refreshToken } = req.body;
 
@@ -71,59 +81,44 @@ export const refreshTokens = async (req: Request, res: Response) => {
       });
     }
 
-    const user = await User.findOne({
-      'refreshTokens.token': refreshToken
-    });
+    if (!req.userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid access token"
+      });
+    }
 
+    const tokenId = await verifyRefreshToken(req.userId, refreshToken);
+    
+    if (!tokenId) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired refresh token. Please login again."
+      });
+    }
+
+    const user = await User.findById(req.userId);
     if (!user) {
-      return res.status(401).json({
+      return res.status(404).json({
         success: false,
-        message: "Invalid refresh token"
+        message: "User not found"
       });
     }
 
-    const tokenData = user.refreshTokens?.find(
-      rt => rt.token === refreshToken
-    );
-
-    if (!tokenData) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid refresh token"
-      });
-    }
-
-    if (tokenData.expiresAt < new Date()) {
-      user.refreshTokens = (user.refreshTokens?.filter(
-        rt => rt.token !== refreshToken
-      ) as any) || [];
-      await user.save();
-
-      return res.status(401).json({
-        success: false,
-        message: "Refresh token expired. Please login again."
-      });
-    }
+    await removeRefreshToken(req.userId, refreshToken);
 
     const newAccessToken = generateAccessToken(
       user._id.toString(), 
       user.tokenVersion || 0
     );
-    const newRefreshToken = generateRefreshToken();
+    const newRefreshToken = generateRefreshTokenForRedis();
 
-    user.refreshTokens = (user.refreshTokens?.filter(
-      rt => rt.token !== refreshToken
-    ) as any) || [];
-    
-    user.refreshTokens.push({
-      token: newRefreshToken,
-      createdAt: new Date(),
-      expiresAt: getRefreshTokenExpiration(),
-      deviceInfo: req.headers['user-agent'] || 'Unknown',
-      ipAddress: req.ip || req.socket.remoteAddress || 'Unknown'
-    });
-
-    await user.save();
+    await saveRefreshToken(
+      user._id.toString(),
+      newRefreshToken,
+      req.headers['user-agent'],
+      req.ip || req.socket.remoteAddress
+    );
 
     res.status(200).json({
       success: true,
@@ -169,14 +164,15 @@ export const login = async (req: Request, res: Response) => {
       return;
     }
 
-    const token = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
-    const refreshToken = generateRefreshToken();
-    user.refreshTokens.push({
-      token: refreshToken,
-      createdAt: new Date(),
-      expiresAt: getRefreshTokenExpiration(),
-    });
-    await user.save();
+    const accessToken = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
+    const refreshToken = generateRefreshTokenForRedis();
+    
+    await saveRefreshToken(
+      user._id.toString(),
+      refreshToken,
+      req.headers['user-agent'],
+      req.ip || req.socket.remoteAddress
+    );
 
     res.status(200).json({
       success: true,
@@ -186,9 +182,10 @@ export const login = async (req: Request, res: Response) => {
           id: user._id,
           name: user.name,
           email: user.email,
+          role: user.role,
         },
-        accessToken: token,
-        refreshToken: refreshToken,
+        accessToken,
+        refreshToken,
       },
     });
   } catch (error) {
@@ -196,11 +193,43 @@ export const login = async (req: Request, res: Response) => {
   }
 }
 
-export const logout = async (req: Request, res: Response): Promise<void> => {
-  res.status(200).json({
-    success: true,
-    message: "Logout successful. Please remove token from client.",
-  });
+export const logout = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      res.status(400).json({
+        success: false,
+        message: "Refresh token is required"
+      });
+      return;
+    }
+
+    if (!req.userId) {
+      res.status(401).json({
+        success: false,
+        message: "Unauthorized"
+      });
+      return;
+    }
+
+    const removed = await removeRefreshToken(req.userId, refreshToken);
+
+    if (!removed) {
+      res.status(404).json({
+        success: false,
+        message: "Refresh token not found or already expired"
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Logout successful",
+    });
+  } catch (error) {
+    handleControllerError(error, res, "logout");
+  }
 };
 
 export const changePassword = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -247,19 +276,22 @@ export const changePassword = async (req: AuthRequest, res: Response): Promise<v
     user.passwordChangedAt = new Date();
     await user.save();
 
-    const token = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
-    const refreshToken = generateRefreshToken();
-    user.refreshTokens.push({
-      token: refreshToken,
-      createdAt: new Date(),
-      expiresAt: getRefreshTokenExpiration(),
-    });
-    await user.save();
+    await removeAllRefreshTokens(user._id.toString());
+
+    const accessToken = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
+    const refreshToken = generateRefreshTokenForRedis();
+    
+    await saveRefreshToken(
+      user._id.toString(),
+      refreshToken,
+      req.headers['user-agent'],
+      req.ip || req.socket.remoteAddress
+    );
 
     res.status(200).json({
       success: true,
       message: "Password changed successfully. All other sessions have been logged out.",
-      data: { accessToken: token, refreshToken: refreshToken }
+      data: { accessToken, refreshToken }
     });
   } catch (error) {
     handleControllerError(error, res, "change password");
@@ -277,25 +309,53 @@ export const logoutAllDevices = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
+    const removedCount = await removeAllRefreshTokens(user._id.toString());
+
     user.tokenVersion = (user.tokenVersion || 0) + 1;
     await user.save();
 
-    const token = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
-    const refreshToken = generateRefreshToken();
-    user.refreshTokens.push({
-      token: refreshToken,
-      createdAt: new Date(),
-      expiresAt: getRefreshTokenExpiration(),
-    });
-    await user.save();
+    const accessToken = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
+    const refreshToken = generateRefreshTokenForRedis();
+    
+    await saveRefreshToken(
+      user._id.toString(),
+      refreshToken,
+      req.headers['user-agent'],
+      req.ip || req.socket.remoteAddress
+    );
 
     res.status(200).json({
       success: true,
-      message: "Logged out from all devices successfully. Use new token for future requests.",
-      data: { accessToken: token, refreshToken: refreshToken }
+      message: `Logged out from all devices successfully. ${removedCount} session(s) terminated.`,
+      data: { accessToken, refreshToken }
     });
   } catch (error) {
     handleControllerError(error, res, "logout all devices");
+  }
+};
+
+export const getActiveSessions = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.userId) {
+      res.status(401).json({
+        success: false,
+        message: "Unauthorized"
+      });
+      return;
+    }
+
+    const sessions = await getUserActiveSessions(req.userId);
+
+    res.status(200).json({
+      success: true,
+      message: "Active sessions retrieved successfully",
+      data: {
+        sessions,
+        totalSessions: sessions.length
+      }
+    });
+  } catch (error) {
+    handleControllerError(error, res, "get active sessions");
   }
 };
 

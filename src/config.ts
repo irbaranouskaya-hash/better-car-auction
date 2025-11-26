@@ -16,6 +16,14 @@ export const config = {
 
   mongoUri: getEnvVar('MONGO_URI'),
 
+  clientUrl: getEnvVar('CLIENT_URL'),
+
+  redis: {
+    host: getEnvVar('REDIS_HOST'),
+    port: parseInt(getEnvVar('REDIS_PORT'), 10),
+    password: getEnvVar('REDIS_PASSWORD'),
+  },
+
   jwt: {
     secret: getEnvVar('JWT_SECRET'),
     accessTokenExpiry: getEnvVar('JWT_EXPIRES_IN'),
