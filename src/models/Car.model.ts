@@ -61,7 +61,9 @@ const carSchema = new Schema<ICarDocument>({
     min: [1, 'MSRP must be positive'],
   },
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
 carSchema.index({ userId: 1, year: -1 });

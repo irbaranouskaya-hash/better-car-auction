@@ -11,7 +11,9 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "create-admin": "tsx src/scripts/createAdmin.ts",
     "close-auctions": "tsx src/scripts/closeExpiredAuctions.ts",
-    "schedule-auctions": "tsx src/scripts/scheduleAuctionClosing.ts"
+    "schedule-auctions": "tsx src/scripts/scheduleAuctionClosing.ts",
+    "migrate-auctions": "tsx src/scripts/migrateAuctions.ts",
+    "test-expired-auction": "tsx src/scripts/createTestExpiredAuction.ts"
   },
   "author": "Iryna Baranouskaya",
   "license": "ISC",

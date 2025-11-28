@@ -230,6 +230,14 @@ export const closeAuction = async (req: AuthRequest, res: Response) => {
       );
     }
 
+    if (auction.isClosed) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Auction is already closed"
+      );
+    }
+
     const allBids = await Bid.find({ auctionId });
 
     await Bid.updateMany({ auctionId }, { isWinning: false });
@@ -254,6 +262,9 @@ export const closeAuction = async (req: AuthRequest, res: Response) => {
         });
       }
     }
+
+    auction.isClosed = true;
+    await auction.save();
 
     sendSuccessResponse(res, 200, "Auction closed and winners determined", {
       auctionId,

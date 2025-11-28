@@ -28,7 +28,7 @@ const findExpiredAuctions = async () => {
   
   const expiredAuctions = await Auction.find({
     endDate: { $lt: now },
-    isActive: true
+    isClosed: false
   }).sort({ endDate: 1 });
 
   return expiredAuctions;
@@ -91,7 +91,7 @@ const closeAuction = async (auction: any): Promise<AuctionResult> => {
 
   const totalBids = await Bid.countDocuments({ auctionId: auction._id });
 
-  auction.isActive = false;
+  auction.isClosed = true;
   await auction.save();
 
   console.log(`   🏆 Winners: ${winners.length}`);
@@ -164,7 +164,7 @@ const runStandalone = async () => {
   }
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url.endsWith('closeExpiredAuctions.ts') || import.meta.url.endsWith('closeExpiredAuctions.js')) {
   runStandalone();
 }
 

@@ -65,7 +65,7 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url.endsWith('scheduleAuctionClosing.ts') || import.meta.url.endsWith('scheduleAuctionClosing.js')) {
   startScheduler().catch((error) => {
     console.error('❌ Error starting scheduler:', error);
     process.exit(1);
