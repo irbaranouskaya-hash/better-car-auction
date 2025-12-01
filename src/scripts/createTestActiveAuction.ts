@@ -3,9 +3,9 @@ import { config } from '../config.js';
 import Auction from '../models/Auction.model.js';
 import User from '../models/User.model.js';
 
-const createTestExpiredAuction = async () => {
+const createTestActiveAuction = async () => {
   try {
-    console.log('🚀 Creating test expired auction...\n');
+    console.log('🚀 Creating test active auction...\n');
 
     await mongoose.connect(config.mongoUri);
     console.log('✅ Connected to MongoDB\n');
@@ -16,16 +16,17 @@ const createTestExpiredAuction = async () => {
       process.exit(1);
     }
 
+    const now = new Date();
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    
-    const twoDaysAgo = new Date();
-    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
 
     const testAuction = new Auction({
-      name: 'Test Expired Auction',
-      startDate: twoDaysAgo,
-      endDate: yesterday,
+      name: 'Active Test Auction',
+      startDate: yesterday,
+      endDate: tomorrow,
       createdBy: admin._id,
       cars: [],
       isClosed: false
@@ -33,7 +34,7 @@ const createTestExpiredAuction = async () => {
     
     await testAuction.save({ validateBeforeSave: false });
 
-    console.log('✅ Test auction created:');
+    console.log('✅ Test active auction created:');
     console.log(`   ID: ${testAuction._id}`);
     console.log(`   Name: ${testAuction.name}`);
     console.log(`   Start Date: ${testAuction.startDate.toLocaleString()}`);
@@ -42,7 +43,7 @@ const createTestExpiredAuction = async () => {
 
     await mongoose.disconnect();
     console.log('\n👋 Disconnected from MongoDB');
-    console.log('\n✅ Now run: npm run close-auctions');
+    console.log('\n✅ Now check: http://localhost:3000/api/auctions?status=active');
 
     process.exit(0);
   } catch (error) {
@@ -52,5 +53,5 @@ const createTestExpiredAuction = async () => {
   }
 };
 
-createTestExpiredAuction();
+createTestActiveAuction();
 

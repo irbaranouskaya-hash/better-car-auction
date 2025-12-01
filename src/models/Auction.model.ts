@@ -6,13 +6,13 @@ export interface IAuctionDocument extends Document {
   endDate: Date;
   createdBy: mongoose.Types.ObjectId;
   cars: mongoose.Types.ObjectId[];
+  isClosed: boolean;
   createdAt: Date;
   updatedAt: Date;
 
-  status: 'upcoming' | 'active' | 'ended';
+  status: 'upcoming' | 'active' | 'ended' | 'closed';
   durationHours: number;
   timeUntilStart: number;
-  isClosed: boolean;
 
   isCurrentlyActive(): boolean;
   canBeEdited(): boolean;
@@ -87,6 +87,10 @@ auctionSchema.index({ isClosed: 1, endDate: 1 });
 auctionSchema.index({ createdBy: 1, createdAt: -1 });
 
 auctionSchema.virtual('status').get(function(this: IAuctionDocument) {
+  if (this.isClosed) {
+    return 'closed';
+  }
+  
   const now = new Date();
   
   if (now < this.startDate) {

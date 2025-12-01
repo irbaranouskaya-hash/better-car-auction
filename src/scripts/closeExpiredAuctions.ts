@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import { config } from '../config.js';
 import Auction from '../models/Auction.model.js';
 import Bid from '../models/Bid.model.js';
+import Car from '../models/Car.model.js';
+import User from '../models/User.model.js';
 
 
 interface WinnerInfo {
@@ -35,7 +37,7 @@ const findExpiredAuctions = async () => {
 };
 
 const determineWinners = async (auctionId: string): Promise<WinnerInfo[]> => {
-  const allBids = await Bid.find({ auctionId }).populate('carId userId');
+  const allBids = await Bid.find({ auctionId });
 
   if (allBids.length === 0) {
     console.log(`   ⚠️  No bids for auction ${auctionId}`);
@@ -52,30 +54,28 @@ const determineWinners = async (auctionId: string): Promise<WinnerInfo[]> => {
     const highestBid = await Bid.findOne({
       auctionId,
       carId
-    })
-      .sort({ amount: -1 })
-      .populate('carId userId');
+    }).sort({ amount: -1 });
 
     if (highestBid) {
       highestBid.isWinning = true;
       await highestBid.save();
 
-      // @ts-expect-error populated fields
-      const car = highestBid.carId;
-      // @ts-expect-error populated fields
-      const user = highestBid.userId;
+      const car = await Car.findById(highestBid.carId);
+      const user = await User.findById(highestBid.userId);
 
-      winners.push({
-        carId: car._id.toString(),
-        carName: `${car.brand} ${car.model} (${car.year})`,
-        bidId: highestBid._id.toString(),
-        userId: user._id.toString(),
-        userName: user.name,
-        userEmail: user.email,
-        amount: highestBid.amount
-      });
+      if (car && user) {
+        winners.push({
+          carId: car._id.toString(),
+          carName: `${car.brand} ${car.model} (${car.year})`,
+          bidId: highestBid._id.toString(),
+          userId: user._id.toString(),
+          userName: user.name,
+          userEmail: user.email,
+          amount: highestBid.amount
+        });
 
-      console.log(`   ✅ Winner for ${car.brand} ${car.model}: ${user.name} ($${highestBid.amount})`);
+        console.log(`   ✅ Winner for ${car.brand} ${car.model} (${car.year}): ${user.name} ($${highestBid.amount})`);
+      }
     }
   }
 

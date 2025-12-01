@@ -9,41 +9,25 @@ const migrateAuctions = async () => {
     await mongoose.connect(config.mongoUri);
     console.log('✅ Connected to MongoDB\n');
 
-    console.log('📊 Removing isActive field from all auctions...');
+    console.log('📊 Removing isActive and status fields from all auctions...');
     
     const result = await Auction.updateMany(
       {},
       { 
-        $unset: { isActive: '' }
+        $unset: { isActive: '', status: '' }
       }
     );
 
     console.log(`✅ Updated ${result.modifiedCount} auctions`);
     console.log(`📋 Matched ${result.matchedCount} auctions\n`);
 
-    console.log('📊 Checking for auctions that need to be marked as closed...');
+    console.log('📊 Ensuring isClosed field exists for all auctions...');
     
-    const now = new Date();
-    const expiredAuctions = await Auction.find({
-      endDate: { $lt: now },
-      isClosed: { $ne: true }
-    });
-
-    console.log(`📋 Found ${expiredAuctions.length} expired auctions without isClosed flag`);
-
-    if (expiredAuctions.length > 0) {
-      const closeResult = await Auction.updateMany(
-        {
-          endDate: { $lt: now },
-          isClosed: { $ne: true }
-        },
-        {
-          $set: { isClosed: true }
-        }
-      );
-
-      console.log(`✅ Marked ${closeResult.modifiedCount} auctions as closed\n`);
-    }
+    const ensureClosedResult = await Auction.updateMany(
+      { isClosed: { $exists: false } },
+      { $set: { isClosed: false } }
+    );
+    console.log(`✅ Set isClosed field for ${ensureClosedResult.modifiedCount} auctions\n`);
 
     await mongoose.disconnect();
     console.log('👋 Disconnected from MongoDB');

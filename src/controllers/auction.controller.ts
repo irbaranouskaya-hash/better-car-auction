@@ -72,13 +72,18 @@ export const getAllAuctions = async (req: Request, res: Response) => {
     const status = req.query.status as string;
     const now = new Date();
 
-    if (status === 'upcoming') {
+    if (status === 'closed') {
+      filters.isClosed = true;
+    } else if (status === 'upcoming') {
       filters.startDate = { $gt: now };
+      filters.isClosed = false;
     } else if (status === 'active') {
       filters.startDate = { $lte: now };
       filters.endDate = { $gte: now };
+      filters.isClosed = false;
     } else if (status === 'ended') {
       filters.endDate = { $lt: now };
+      filters.isClosed = false;
     }
 
     if (req.query.createdBy) {

@@ -25,6 +25,8 @@ const PRICE_CONFIG = {
 interface ICarDocument extends Document {
   userId: mongoose.Types.ObjectId;
   VIN: string;
+  brand: string;
+  model: string;
   odometerValue: number;
   year: number;
   exteriorColor: string;
@@ -47,6 +49,8 @@ const carSchema = new Schema<ICarDocument>({
     required: true
   },
   VIN: {type: String, required: true, unique: true, index: true},
+  brand: {type: String, required: true, index: true},
+  model: {type: String, required: true, index: true},
   odometerValue: {type: Number, required: true, index: true},
   year: {type: Number, required: true, index: true},
   exteriorColor: {type: String, required: true, index: true},
@@ -70,6 +74,7 @@ carSchema.index({ userId: 1, year: -1 });
 carSchema.index({ userId: 1, createdAt: -1 });
 carSchema.index({ year: 1, odometerValue: 1 });
 carSchema.index({ year: 1, createdAt: -1 });
+carSchema.index({ brand: 1, model: 1 });
 
 carSchema.virtual("grade").get(function() {
   let grade = GRADE_LIMITS.MAX_GRADE;

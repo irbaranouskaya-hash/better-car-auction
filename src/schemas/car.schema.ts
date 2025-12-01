@@ -6,6 +6,16 @@ export const createCarSchema = z.object({
     .max(17, "VIN must be exactly 17 characters")
     .regex(/^[A-HJ-NPR-Z0-9]{17}$/, "Invalid VIN format"),
   
+  brand: z.string()
+    .min(1, "Brand is required")
+    .max(50, "Brand must be at most 50 characters")
+    .trim(),
+  
+  model: z.string()
+    .min(1, "Model is required")
+    .max(50, "Model must be at most 50 characters")
+    .trim(),
+  
   odometerValue: z.number()
     .int("Odometer value must be an integer")
     .min(0, "Odometer value cannot be negative")
@@ -55,6 +65,9 @@ export const getCarsQuerySchema = z.object({
     .min(17).max(17)
     .regex(/^[A-HJ-NPR-Z0-9]{17}$/, "Invalid VIN format")
     .optional(),
+  
+  brand: z.string().max(50).optional(),
+  model: z.string().max(50).optional(),
     
   exteriorColor: z.string().max(50).optional(),
   interiorColor: z.string().max(50).optional(),
@@ -118,7 +131,7 @@ export const getCarsQuerySchema = z.object({
     .max(100)
     .default(10),
     
-  sortBy: z.enum(['VIN', 'odometerValue', 'year', 'exteriorColor', 'interiorColor', 'createdAt', 'updatedAt'])
+  sortBy: z.enum(['VIN', 'brand', 'model', 'odometerValue', 'year', 'exteriorColor', 'interiorColor', 'createdAt', 'updatedAt'])
     .optional()
     .default('createdAt'),
     
