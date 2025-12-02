@@ -1,15 +1,11 @@
-import mongoose from 'mongoose';
-import User from '../models/User.model.js';
-import { UserRole } from '../models/User.model.js';
-import dotenv from 'dotenv';
+import { initDatabase, getRepo, disconnectDatabase } from '../db/index.js';
 import { config } from '../config.js';
-
-
-dotenv.config();
 
 const createAdmin = async () => {
   try {
-    await mongoose.connect(config.mongoUri);
+    await initDatabase();
+    
+    const { user: userRepo } = getRepo();
     
     const adminName = config.admin.name;
     const adminEmail = config.admin.email;
@@ -26,29 +22,32 @@ const createAdmin = async () => {
       process.exit(1);
     }
 
-    const existingAdmin = await User.findOne({ email: adminEmail });
+    const existingAdmin = await userRepo.findByEmail(adminEmail);
     
     if (existingAdmin) {
       console.log('Admin already exists');
+      await disconnectDatabase();
       process.exit(0);
     }
     
-    const admin = await User.create({
+    const admin = await userRepo.create({
       name: adminName,
       email: adminEmail,
       password: adminPassword,
-      role: UserRole.ADMIN
+      role: 'admin'
     });
     
     console.log('Admin created successfully:', {
-      id: admin._id,
+      id: admin.id,
       email: admin.email,
       role: admin.role
     });
     
+    await disconnectDatabase();
     process.exit(0);
   } catch (error) {
     console.error('Error creating admin:', error);
+    await disconnectDatabase();
     process.exit(1);
   }
 };

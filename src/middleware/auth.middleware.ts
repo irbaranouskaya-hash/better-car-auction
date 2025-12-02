@@ -1,11 +1,11 @@
 import { type Request, type Response, type NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { config } from '../config.js';
-import User, { UserRole } from "../models/User.model.js";
+import { getRepo } from "../db/index.js";
 
 export interface AuthRequest extends Request {
   userId?: string;
-  userRole?: UserRole;
+  userRole?: 'user' | 'admin';
 }
 
 export const authenticate = async (
@@ -30,7 +30,8 @@ export const authenticate = async (
     try {
       const decoded = jwt.verify(token, secret) as { userId: string, tokenVersion?: number, iat?: number };
 
-      const user = await User.findById(decoded.userId);
+      const { user: userRepo } = getRepo();
+      const user = await userRepo.findById(decoded.userId);
       
       if (!user) {
         res.status(401).json({
@@ -62,7 +63,7 @@ export const authenticate = async (
       }
     
       req.userId = decoded.userId;
-      req.userRole = user.role as UserRole;
+      req.userRole = user.role;
       
       next();
     } catch (jwtError) {
@@ -87,7 +88,7 @@ export const requireAdmin = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    if (req.userRole !== UserRole.ADMIN) {
+    if (req.userRole !== 'admin') {
       res.status(403).json({
         success: false,
         message: "Access denied. Admin privileges required.",

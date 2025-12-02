@@ -1,6 +1,5 @@
 import { closeExpiredAuctions } from './closeExpiredAuctions.js';
-import mongoose from 'mongoose';
-import { config } from '../config.js';
+import { initDatabase, disconnectDatabase } from '../db/index.js';
 
 const CHECK_INTERVAL = parseInt(process.env.AUCTION_CHECK_INTERVAL || '300000', 10);
 
@@ -35,10 +34,7 @@ export const startScheduler = async () => {
   console.log('🕐 Starting auction closing scheduler...');
   console.log(`📅 Check interval: ${CHECK_INTERVAL / 1000} seconds (${CHECK_INTERVAL / 60000} minutes)`);
 
-  if (mongoose.connection.readyState === 0) {
-    await mongoose.connect(config.mongoUri);
-    console.log('✅ Connected to MongoDB');
-  }
+  await initDatabase();
 
   await checkAndCloseAuctions();
 
@@ -49,7 +45,7 @@ export const startScheduler = async () => {
 
 export const stopScheduler = async () => {
   console.log('🛑 Stopping scheduler...');
-  await mongoose.disconnect();
+  await disconnectDatabase();
   console.log('👋 Scheduler stopped');
 };
 
@@ -71,4 +67,3 @@ if (import.meta.url.endsWith('scheduleAuctionClosing.ts') || import.meta.url.end
     process.exit(1);
   });
 }
-

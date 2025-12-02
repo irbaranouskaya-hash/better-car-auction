@@ -1,50 +1,44 @@
 import { type Request, type Response } from "express";
-import Car from "../models/Car.model.js";
-
 import { 
   validateIdParam, 
   sendErrorResponse, 
   sendSuccessResponse, 
   handleControllerError 
 } from "../utils/validation.utils.js";
-import {
-  buildCarFilters,
-  getPaginationParams,
-  getSortParams,
-  createPaginatedResponse
-} from "../utils/query.utils.js";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
-import { UserRole } from "../models/User.model.js";
 import type { CreateCarInput, GetCarsQuery, UpdateCarInput } from "../schemas/car.schema.js";
+import { getRepo } from "../db/index.js";
+import type { CarFilters } from "../db/interfaces/ICarRepository.js";
 
 export const createCar = async (req: AuthRequest, res: Response) => {
   try {
-    const carData = req.body as CreateCarInput
+    const { car: carRepo } = getRepo();
+    const carData = req.body as CreateCarInput;
 
-    const existingCar = await Car.findOne({ VIN: carData.VIN });
+    const existingCar = await carRepo.findByVIN(carData.VIN);
     if (existingCar) {
       return sendErrorResponse(res, 400, "Car with this VIN already exists");
     }
 
-    const car = await Car.create({
+    const car = await carRepo.create({
       ...carData,
-      userId: req.userId,
+      userId: req.userId!,
     });
 
     sendSuccessResponse(res, 201, "Car created successfully", car);
   } catch (error) {
     handleControllerError(error, res, "car creation");
   }
-}
+};
 
 export const getCar = async (req: Request, res: Response) => {
   try {
+    const { car: carRepo } = getRepo();
     const { id } = req.params;
     
     if (!validateIdParam(id, res, "car")) return;
     
-    const car = await Car.findById(id)
-      .populate("userId", "name email");
+    const car = await carRepo.findByIdWithOwner(id);
     if (!car) {
       return sendErrorResponse(res, 404, "Car not found");
     }
@@ -53,21 +47,22 @@ export const getCar = async (req: Request, res: Response) => {
   } catch (error) {
     handleControllerError(error, res, "car retrieval");
   }
-}
+};
 
 export const deleteCar = async (req: AuthRequest, res: Response) => {
   try {
+    const { car: carRepo } = getRepo();
     const { id } = req.params;
     
     if (!validateIdParam(id, res, "car")) return;
     
-    const car = await Car.findById(id);
+    const car = await carRepo.findById(id);
     if (!car) {
       return sendErrorResponse(res, 404, "Car not found");
     }
     
-    const isOwner = car.userId.toString() === req.userId;
-    const isAdmin = req.userRole === UserRole.ADMIN;
+    const isOwner = car.userId === req.userId;
+    const isAdmin = req.userRole === 'admin';
     
     if (!isOwner && !isAdmin) {
       return sendErrorResponse(
@@ -77,43 +72,41 @@ export const deleteCar = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    await Car.findByIdAndDelete(id);
+    await carRepo.delete(id);
     
     sendSuccessResponse(res, 200, "Car deleted successfully", car);
   } catch (error) {
     handleControllerError(error, res, "car deletion");
   }
-}
+};
 
 export const updateCar = async (req: AuthRequest, res: Response) => {
   try {
+    const { car: carRepo } = getRepo();
     const { id } = req.params;
 
     if (!validateIdParam(id, res, "car")) return;
 
-    const updatedData = req.body as UpdateCarInput
+    const updatedData = req.body as UpdateCarInput;
 
-    const existingCar = await Car.findById(id);
+    const existingCar = await carRepo.findById(id);
 
     if (!existingCar) {
       return sendErrorResponse(res, 404, "Car not found");
     }
 
-    if (existingCar.userId.toString() !== req.userId) {
+    if (existingCar.userId !== req.userId) {
       return sendErrorResponse(res, 403, "You are not authorized to update this car. Only the owner can modify it.");
     }
 
     if (updatedData.VIN) {
-      const existingCar = await Car.findOne({ VIN: updatedData.VIN, _id: { $ne: id } });
-      if (existingCar) {
+      const carWithVIN = await carRepo.findByVINExcluding(updatedData.VIN, id);
+      if (carWithVIN) {
         return sendErrorResponse(res, 400, "Car with this VIN already exists");
       }
     }
 
-    const car = await Car.findByIdAndUpdate(id, updatedData, { 
-      new: true,
-      runValidators: true
-    });
+    const car = await carRepo.update(id, updatedData);
 
     if (!car) {
       return sendErrorResponse(res, 404, "Car not found");
@@ -127,9 +120,27 @@ export const updateCar = async (req: AuthRequest, res: Response) => {
 
 export const getAllCars = async (req: Request, res: Response) => {
   try {
+    const { car: carRepo } = getRepo();
     const query = req.query as unknown as GetCarsQuery;
     
-    const filters = buildCarFilters(query);
+    const filters: CarFilters = {
+      userId: query.userId,
+      VIN: query.VIN,
+      brand: query.brand,
+      model: query.model,
+      exteriorColor: query.exteriorColor,
+      interiorColor: query.interiorColor,
+      odometerValue: query.odometerValue,
+      year: query.year,
+      minOdometer: query.minOdometer,
+      maxOdometer: query.maxOdometer,
+      minYear: query.minYear,
+      maxYear: query.maxYear,
+      haveStrongScratches: query.haveStrongScratches,
+      haveSmallScratches: query.haveSmallScratches,
+      haveMalfunctions: query.haveMalfunctions,
+      haveElectricFailures: query.haveElectricFailures,
+    };
 
     const page = query.page || 1;
     const limit = query.limit || 10;
@@ -138,50 +149,62 @@ export const getAllCars = async (req: Request, res: Response) => {
     const sortField = query.sortBy || 'createdAt';
     const sortOrder = query.order === 'asc' ? 1 : -1;
 
-    const total = await Car.countDocuments(filters);
-
-    const cars = await Car.find(filters)
-      .sort({ [sortField]: sortOrder })
-      .skip(skip)
-      .limit(limit)
-      .populate("userId", "name email");
-
-    const response = createPaginatedResponse(cars, total, { page, limit, skip });
+    const result = await carRepo.findAll(
+      filters,
+      { page, limit, skip },
+      { sortField, sortOrder }
+    );
 
     res.status(200).json({
       success: true,
       message: "Cars retrieved successfully",
-      ...response
+      data: result.data,
+      pagination: {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        totalPages: result.totalPages,
+      }
     });
   } catch (error) {
     handleControllerError(error, res, "cars retrieval");
   }
-}
+};
 
 export const calculateCarPrice = async (req: Request, res: Response) => {
   try {
+    const { car: carRepo } = getRepo();
     const { id } = req.params;
     
     if (!validateIdParam(id, res, "car")) return;
     
-    const car = await Car.findById(id);
+    const car = await carRepo.findById(id);
     if (!car) {
       return sendErrorResponse(res, 404, "Car not found");
     }
     
-    // @ts-expect-error
-    const priceWithMarket = await car.calculatePriceWithMarket();
+    const similarCars = await carRepo.findSimilar(car.year, car.odometerValue, id, 10);
+    
+    let priceWithMarket = car.optimizedPrice;
+    if (similarCars.length > 0) {
+      const avgMarketPrice = similarCars.reduce((sum, c) => sum + c.optimizedPrice, 0) / similarCars.length;
+      priceWithMarket = Math.round((car.optimizedPrice + avgMarketPrice) / 2);
+    }
     
     sendSuccessResponse(res, 200, "Price calculated successfully", {
       car: {
-        id: car._id,
+        id: car.id,
         VIN: car.VIN,
+        brand: car.brand,
+        model: car.model,
         year: car.year,
         odometerValue: car.odometerValue,
         msrp: car.msrp,
       },
       grade: car.grade,
+      optimizedPrice: car.optimizedPrice,
       marketAdjustedPrice: priceWithMarket,
+      similarCarsCount: similarCars.length,
     });
   } catch (error) {
     handleControllerError(error, res, "price calculation");

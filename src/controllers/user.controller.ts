@@ -1,9 +1,7 @@
 import { type Request, type Response } from "express";
-import User, { UserRole } from "../models/User.model.js";
-import jwt from "jsonwebtoken";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
 import { handleControllerError, sendErrorResponse } from "../utils/validation.utils.js";
-import { generateAccessToken, getRefreshTokenExpiration } from "../utils/token.utils.js";
+import { generateAccessToken } from "../utils/token.utils.js";
 import { 
   generateRefreshTokenForRedis,
   saveRefreshToken,
@@ -12,27 +10,28 @@ import {
   removeAllRefreshTokens,
   getUserActiveSessions
 } from "../utils/redis-token.utils.js";
-
+import { getRepo } from "../db/index.js";
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const {name, email, password} = req.body;
+    const { user: userRepo } = getRepo();
+    const { name, email, password } = req.body;
 
-    if(!name || !email || !password) {
+    if (!name || !email || !password) {
       return res.status(400).json({
         success: false,
         message: "Name, email and password are required"
       });
     }
 
-    if(password.length < 8) {
+    if (password.length < 8) {
       return res.status(400).json({
         success: false,
         message: "Password must be at least 8 characters long"
       });
     }
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await userRepo.findByEmail(email);
     if (existingUser) {
       return res.status(400).json({ 
         success: false,
@@ -40,13 +39,13 @@ export const register = async (req: Request, res: Response) => {
       });
     }
 
-    const user = await User.create({name, email, password});
+    const user = await userRepo.create({ name, email, password, role: 'user' });
     
-    const accessToken = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
+    const accessToken = generateAccessToken(user.id, user.tokenVersion || 0);
     const refreshToken = generateRefreshTokenForRedis();
     
     await saveRefreshToken(
-      user._id.toString(),
+      user.id,
       refreshToken,
       req.headers['user-agent'],
       req.ip || req.socket.remoteAddress
@@ -57,7 +56,7 @@ export const register = async (req: Request, res: Response) => {
       message: "User registered successfully",
       data: {
         user: {
-          id: user._id,
+          id: user.id,
           name: user.name,
           email: user.email,
         },
@@ -68,10 +67,11 @@ export const register = async (req: Request, res: Response) => {
   } catch (error) {
     handleControllerError(error, res, "registration");
   }
-}
+};
 
 export const refreshTokens = async (req: AuthRequest, res: Response) => {
   try {
+    const { user: userRepo } = getRepo();
     const { refreshToken } = req.body;
 
     if (!refreshToken) {
@@ -97,7 +97,7 @@ export const refreshTokens = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const user = await User.findById(req.userId);
+    const user = await userRepo.findById(req.userId);
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -107,14 +107,11 @@ export const refreshTokens = async (req: AuthRequest, res: Response) => {
 
     await removeRefreshToken(req.userId, refreshToken);
 
-    const newAccessToken = generateAccessToken(
-      user._id.toString(), 
-      user.tokenVersion || 0
-    );
+    const newAccessToken = generateAccessToken(user.id, user.tokenVersion || 0);
     const newRefreshToken = generateRefreshTokenForRedis();
 
     await saveRefreshToken(
-      user._id.toString(),
+      user.id,
       newRefreshToken,
       req.headers['user-agent'],
       req.ip || req.socket.remoteAddress
@@ -134,28 +131,27 @@ export const refreshTokens = async (req: AuthRequest, res: Response) => {
   }
 };
 
-
 export const login = async (req: Request, res: Response) => {
   try {
-    const {email, password} = req.body;
+    const { user: userRepo } = getRepo();
+    const { email, password } = req.body;
 
-    if(!email || !password) {
+    if (!email || !password) {
       return res.status(400).json({
         success: false,
         message: "Email and password are required"
       });
     }
 
-    const user = await User.findOne({ email });
-    if(!user) {
+    const user = await userRepo.findByEmail(email);
+    if (!user) {
       return res.status(401).json({
         success: false,
         message: "Invalid credentials"
       });
     }
 
-    // @ts-expect-error: comparePassword is a custom method defined on the User schema
-    const isPasswordValid = await user.comparePassword(password);
+    const isPasswordValid = await userRepo.comparePassword(user, password);
     if (!isPasswordValid) {
       res.status(401).json({ 
         success: false,
@@ -164,11 +160,11 @@ export const login = async (req: Request, res: Response) => {
       return;
     }
 
-    const accessToken = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
+    const accessToken = generateAccessToken(user.id, user.tokenVersion || 0);
     const refreshToken = generateRefreshTokenForRedis();
     
     await saveRefreshToken(
-      user._id.toString(),
+      user.id,
       refreshToken,
       req.headers['user-agent'],
       req.ip || req.socket.remoteAddress
@@ -179,7 +175,7 @@ export const login = async (req: Request, res: Response) => {
       message: "Login successful",
       data: {
         user: {
-          id: user._id,
+          id: user.id,
           name: user.name,
           email: user.email,
           role: user.role,
@@ -191,7 +187,7 @@ export const login = async (req: Request, res: Response) => {
   } catch (error) {
     handleControllerError(error, res, "login");
   }
-}
+};
 
 export const logout = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -234,6 +230,7 @@ export const logout = async (req: AuthRequest, res: Response): Promise<void> => 
 
 export const changePassword = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const { user: userRepo } = getRepo();
     const { currentPassword, newPassword } = req.body;
 
     if (!currentPassword || !newPassword) {
@@ -252,7 +249,7 @@ export const changePassword = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    const user = await User.findById(req.userId);
+    const user = await userRepo.findById(req.userId!);
     if (!user) {
       res.status(404).json({
         success: false,
@@ -261,8 +258,7 @@ export const changePassword = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    // @ts-expect-error: comparePassword is a custom method defined on the User schema
-    const isPasswordValid = await user.comparePassword(currentPassword);
+    const isPasswordValid = await userRepo.comparePassword(user, currentPassword);
     if (!isPasswordValid) {
       res.status(401).json({
         success: false,
@@ -271,18 +267,21 @@ export const changePassword = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    user.password = newPassword;
-    user.tokenVersion = (user.tokenVersion || 0) + 1;
-    user.passwordChangedAt = new Date();
-    await user.save();
+    const hashedPassword = await userRepo.hashPassword(newPassword);
+    await userRepo.update(user.id, { 
+      password: hashedPassword,
+      tokenVersion: (user.tokenVersion || 0) + 1,
+      passwordChangedAt: new Date()
+    });
 
-    await removeAllRefreshTokens(user._id.toString());
+    await removeAllRefreshTokens(user.id);
 
-    const accessToken = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
+    const updatedUser = await userRepo.findById(user.id);
+    const accessToken = generateAccessToken(user.id, updatedUser?.tokenVersion || 0);
     const refreshToken = generateRefreshTokenForRedis();
     
     await saveRefreshToken(
-      user._id.toString(),
+      user.id,
       refreshToken,
       req.headers['user-agent'],
       req.ip || req.socket.remoteAddress
@@ -300,7 +299,9 @@ export const changePassword = async (req: AuthRequest, res: Response): Promise<v
 
 export const logoutAllDevices = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const user = await User.findById(req.userId);
+    const { user: userRepo } = getRepo();
+    
+    const user = await userRepo.findById(req.userId!);
     if (!user) {
       res.status(404).json({
         success: false,
@@ -309,16 +310,16 @@ export const logoutAllDevices = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    const removedCount = await removeAllRefreshTokens(user._id.toString());
+    const removedCount = await removeAllRefreshTokens(user.id);
 
-    user.tokenVersion = (user.tokenVersion || 0) + 1;
-    await user.save();
+    await userRepo.update(user.id, { tokenVersion: (user.tokenVersion || 0) + 1 });
 
-    const accessToken = generateAccessToken(user._id.toString(), user.tokenVersion || 0);
+    const updatedUser = await userRepo.findById(user.id);
+    const accessToken = generateAccessToken(user.id, updatedUser?.tokenVersion || 0);
     const refreshToken = generateRefreshTokenForRedis();
     
     await saveRefreshToken(
-      user._id.toString(),
+      user.id,
       refreshToken,
       req.headers['user-agent'],
       req.ip || req.socket.remoteAddress
@@ -361,15 +362,16 @@ export const getActiveSessions = async (req: AuthRequest, res: Response): Promis
 
 export const deleteUser = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const { user: userRepo } = getRepo();
     const { id } = req.params;
 
-    const targetUser = await User.findById(id);
+    const targetUser = await userRepo.findById(id);
     if (!targetUser) {
       return sendErrorResponse(res, 404, "User not found");
     }
 
-    const isTargetUser = targetUser._id.toString() === req.userId;
-    const isAdmin = req.userRole === UserRole.ADMIN;
+    const isTargetUser = targetUser.id === req.userId;
+    const isAdmin = req.userRole === 'admin';
     
     if (!isTargetUser && !isAdmin) {
       return sendErrorResponse(
@@ -379,9 +381,9 @@ export const deleteUser = async (req: AuthRequest, res: Response): Promise<void>
       );
     }
 
-    const user = await User.findByIdAndDelete(id);
+    const deleted = await userRepo.delete(id);
 
-    if (!user) {
+    if (!deleted) {
       res.status(404).json({ 
         success: false,
         message: "User not found" 
@@ -402,53 +404,38 @@ export const deleteUser = async (req: AuthRequest, res: Response): Promise<void>
   }
 };
 
-const validateTargetUser = async (
-  req: AuthRequest,
-  res: Response
-): Promise<{ targetUser: any } | null> => {
-  const { userId } = req.body;
-  
-  if (!userId) {
-    sendErrorResponse(res, 400, "User ID is required");
-    return null;
-  }
-
-  const targetUser = await User.findById(userId);
-  
-  if (!targetUser) {
-    sendErrorResponse(res, 404, "User not found");
-    return null;
-  }
-
-  return { targetUser };
-};
-
 export const assignAdminRole = async (req: AuthRequest, res: Response) => {
   try {
-    const validation = await validateTargetUser(req, res);
-    if (!validation) return;
+    const { user: userRepo } = getRepo();
+    const { userId } = req.body;
     
-    const { targetUser } = validation;
+    if (!userId) {
+      return sendErrorResponse(res, 400, "User ID is required");
+    }
 
-    if (targetUser.role === UserRole.ADMIN) {
+    const targetUser = await userRepo.findById(userId);
+    if (!targetUser) {
+      return sendErrorResponse(res, 404, "User not found");
+    }
+
+    if (targetUser.role === 'admin') {
       return res.status(400).json({
         success: false,
         message: "User is already an admin"
       });
     }
 
-    targetUser.role = UserRole.ADMIN;
-    await targetUser.save();
+    const updatedUser = await userRepo.update(userId, { role: 'admin' });
 
     res.status(200).json({
       success: true,
       message: "Admin role assigned successfully",
       data: {
         user: {
-          id: targetUser._id,
-          name: targetUser.name,
-          email: targetUser.email,
-          role: targetUser.role
+          id: updatedUser!.id,
+          name: updatedUser!.name,
+          email: updatedUser!.email,
+          role: updatedUser!.role
         }
       }
     });
@@ -459,37 +446,43 @@ export const assignAdminRole = async (req: AuthRequest, res: Response) => {
 
 export const revokeAdminRole = async (req: AuthRequest, res: Response) => {
   try {
-    const validation = await validateTargetUser(req, res);
-    if (!validation) return;
+    const { user: userRepo } = getRepo();
+    const { userId } = req.body;
     
-    const { targetUser } = validation;
+    if (!userId) {
+      return sendErrorResponse(res, 400, "User ID is required");
+    }
 
-    if (targetUser._id.toString() === req.userId) {
+    const targetUser = await userRepo.findById(userId);
+    if (!targetUser) {
+      return sendErrorResponse(res, 404, "User not found");
+    }
+
+    if (targetUser.id === req.userId) {
       return res.status(400).json({
         success: false,
         message: "You cannot revoke your own admin role"
       });
     }
 
-    if (targetUser.role !== UserRole.ADMIN) {
+    if (targetUser.role !== 'admin') {
       return res.status(400).json({
         success: false,
         message: "User is not an admin"
       });
     }
 
-    targetUser.role = UserRole.USER;
-    await targetUser.save();
+    const updatedUser = await userRepo.update(userId, { role: 'user' });
 
     res.status(200).json({
       success: true,
       message: "Admin role revoked successfully",
       data: {
         user: {
-          id: targetUser._id,
-          name: targetUser.name,
-          email: targetUser.email,
-          role: targetUser.role
+          id: updatedUser!.id,
+          name: updatedUser!.name,
+          email: updatedUser!.email,
+          role: updatedUser!.role
         }
       }
     });

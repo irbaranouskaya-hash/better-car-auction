@@ -1,16 +1,10 @@
-import mongoose from 'mongoose';
-import { config } from '../config.js';
-import Auction from '../models/Auction.model.js';
-import Bid from '../models/Bid.model.js';
-import Car from '../models/Car.model.js';
-import User from '../models/User.model.js';
-
+import { initDatabase, getRepo, disconnectDatabase } from '../db/index.js';
 
 interface WinnerInfo {
   carId: string;
   carName: string;
   bidId: string;
-  userId: string;
+  oderId: string;
   userName: string;
   userEmail: string;
   amount: number;
@@ -24,51 +18,37 @@ interface AuctionResult {
   totalBids: number;
 }
 
-
-const findExpiredAuctions = async () => {
-  const now = new Date();
-  
-  const expiredAuctions = await Auction.find({
-    endDate: { $lt: now },
-    isClosed: false
-  }).sort({ endDate: 1 });
-
-  return expiredAuctions;
-};
-
 const determineWinners = async (auctionId: string): Promise<WinnerInfo[]> => {
-  const allBids = await Bid.find({ auctionId });
+  const { bid: bidRepo, car: carRepo, user: userRepo } = getRepo();
+  
+  const allBids = await bidRepo.findByAuction(auctionId);
 
   if (allBids.length === 0) {
     console.log(`   ⚠️  No bids for auction ${auctionId}`);
     return [];
   }
 
-  await Bid.updateMany({ auctionId }, { isWinning: false });
+  await bidRepo.resetWinningForAuction(auctionId);
 
-  const carIds = [...new Set(allBids.map(bid => bid.carId.toString()))];
+  const carIds = [...new Set(allBids.map(bid => bid.carId))];
   
   const winners: WinnerInfo[] = [];
 
   for (const carId of carIds) {
-    const highestBid = await Bid.findOne({
-      auctionId,
-      carId
-    }).sort({ amount: -1 });
+    const highestBid = await bidRepo.findHighestForCar(auctionId, carId);
 
     if (highestBid) {
-      highestBid.isWinning = true;
-      await highestBid.save();
+      await bidRepo.setWinning(highestBid.id, true);
 
-      const car = await Car.findById(highestBid.carId);
-      const user = await User.findById(highestBid.userId);
+      const car = await carRepo.findById(highestBid.carId);
+      const user = await userRepo.findById(highestBid.userId);
 
       if (car && user) {
         winners.push({
-          carId: car._id.toString(),
+          carId: car.id,
           carName: `${car.brand} ${car.model} (${car.year})`,
-          bidId: highestBid._id.toString(),
-          userId: user._id.toString(),
+          bidId: highestBid.id,
+          oderId: user.id,
           userName: user.name,
           userEmail: user.email,
           amount: highestBid.amount
@@ -83,22 +63,23 @@ const determineWinners = async (auctionId: string): Promise<WinnerInfo[]> => {
 };
 
 const closeAuction = async (auction: any): Promise<AuctionResult> => {
+  const { auction: auctionRepo, bid: bidRepo } = getRepo();
+  
   console.log(`\n🔨 Closing auction: ${auction.name}`);
   console.log(`   📅 End date: ${auction.endDate.toLocaleString()}`);
   console.log(`   🚗 Cars in auction: ${auction.cars.length}`);
 
-  const winners = await determineWinners(auction._id.toString());
+  const winners = await determineWinners(auction.id);
 
-  const totalBids = await Bid.countDocuments({ auctionId: auction._id });
+  const totalBids = await bidRepo.countByAuction(auction.id);
 
-  auction.isClosed = true;
-  await auction.save();
+  await auctionRepo.close(auction.id);
 
   console.log(`   🏆 Winners: ${winners.length}`);
   console.log(`   📊 Total bids: ${totalBids}`);
 
   return {
-    auctionId: auction._id.toString(),
+    auctionId: auction.id,
     auctionName: auction.name,
     totalCars: auction.cars.length,
     winners,
@@ -108,9 +89,11 @@ const closeAuction = async (auction: any): Promise<AuctionResult> => {
 
 export const closeExpiredAuctions = async (): Promise<AuctionResult[]> => {
   try {
+    const { auction: auctionRepo } = getRepo();
+    
     console.log('🔍 Searching for expired auctions...\n');
 
-    const expiredAuctions = await findExpiredAuctions();
+    const expiredAuctions = await auctionRepo.findExpired();
 
     if (expiredAuctions.length === 0) {
       console.log('✅ No auctions to close.');
@@ -148,18 +131,17 @@ const runStandalone = async () => {
   console.log('🚀 Starting auction closing script...\n');
 
   try {
-    await mongoose.connect(config.mongoUri);
-    console.log('✅ Connected to MongoDB\n');
+    await initDatabase();
+    console.log('');
 
     await closeExpiredAuctions();
 
-    await mongoose.disconnect();
-    console.log('👋 Disconnected from MongoDB');
+    await disconnectDatabase();
 
     process.exit(0);
   } catch (error) {
     console.error('❌ Critical error:', error);
-    await mongoose.disconnect();
+    await disconnectDatabase();
     process.exit(1);
   }
 };
@@ -167,4 +149,3 @@ const runStandalone = async () => {
 if (import.meta.url.endsWith('closeExpiredAuctions.ts') || import.meta.url.endsWith('closeExpiredAuctions.js')) {
   runStandalone();
 }
-

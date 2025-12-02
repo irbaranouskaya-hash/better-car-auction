@@ -1,9 +1,9 @@
 import express, { type Request, type Response } from "express";
-import { config } from "./config";
-import connectDB from "./db";
-import { connectRedis } from "./redis";
-import routes from "./routes/index";
-import cors from "cors"
+import { config } from "./config.js";
+import { initDatabase } from "./db/index.js";
+import { connectRedis } from "./redis.js";
+import routes from "./routes/index.js";
+import cors from "cors";
 
 const app = express();
 const PORT = config.port;
@@ -24,6 +24,6 @@ app.use("/api", routes);
 
 app.listen(PORT, async () => {
   console.log(`🚀 Server is running at http://localhost:${PORT}`);
-  await connectDB();
+  await initDatabase();
   await connectRedis();
 });

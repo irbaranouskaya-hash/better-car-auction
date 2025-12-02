@@ -1,7 +1,4 @@
 import { type Request, type Response } from "express";
-import Bid from "../models/Bid.model.js";
-import Auction from "../models/Auction.model.js";
-import Car from "../models/Car.model.js";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
 import {
   validateIdParam,
@@ -9,24 +6,24 @@ import {
   sendSuccessResponse,
   handleControllerError
 } from "../utils/validation.utils.js";
-import {
-  createPaginatedResponse
-} from "../utils/query.utils.js";
 import type { CreateBidInput, GetBidsQuery } from "../schemas/bid.schema.js";
+import { getRepo } from "../db/index.js";
+import type { BidFilters } from "../db/interfaces/IBidRepository.js";
 
 export const createBid = async (req: AuthRequest, res: Response) => {
   try {
-    const { auctionId } = req.params;
+    const { auction: auctionRepo, car: carRepo, bid: bidRepo } = getRepo();
+    const auctionId = req.params.auctionId as string;
     const bidData = req.body as CreateBidInput;
 
     if (!validateIdParam(auctionId, res, "auction")) return;
 
-    const auction = await Auction.findById(auctionId);
+    const auction = await auctionRepo.findById(auctionId);
     if (!auction) {
       return sendErrorResponse(res, 404, "Auction not found");
     }
 
-    if (!auction.isCurrentlyActive()) {
+    if (auction.status !== 'active') {
       return sendErrorResponse(
         res, 
         400, 
@@ -34,9 +31,7 @@ export const createBid = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    const isCarInAuction = auction.cars.some(
-      carId => carId.toString() === bidData.carId
-    );
+    const isCarInAuction = auction.cars.includes(bidData.carId);
 
     if (!isCarInAuction) {
       return sendErrorResponse(
@@ -46,15 +41,12 @@ export const createBid = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    const car = await Car.findById(bidData.carId);
+    const car = await carRepo.findById(bidData.carId);
     if (!car) {
       return sendErrorResponse(res, 404, "Car not found");
     }
 
-    const highestBid = await Bid.findOne({
-      auctionId,
-      carId: bidData.carId
-    }).sort({ amount: -1 });
+    const highestBid = await bidRepo.findHighestForCar(auctionId, bidData.carId);
 
     if (highestBid && bidData.amount <= highestBid.amount) {
       return sendErrorResponse(
@@ -72,36 +64,32 @@ export const createBid = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    const existingBid = await Bid.findOne({
-      auctionId,
-      carId: bidData.carId,
-      userId: req.userId
-    });
+    const existingBid = await bidRepo.findExisting(auctionId, bidData.carId, req.userId!);
 
     let bid;
+    let isUpdate = false;
     if (existingBid) {
-      existingBid.amount = bidData.amount;
-      existingBid.placedAt = new Date();
-      bid = await existingBid.save();
+      bid = await bidRepo.update(existingBid.id, { 
+        amount: bidData.amount, 
+        placedAt: new Date() 
+      });
+      isUpdate = true;
     } else {
-      bid = await Bid.create({
+      bid = await bidRepo.create({
         auctionId,
         carId: bidData.carId,
-        userId: req.userId,
+        userId: req.userId!,
         amount: bidData.amount
       });
     }
 
-    await bid.populate([
-      { path: 'userId', select: 'name email' },
-      { path: 'carId', select: 'VIN year msrp' }
-    ]);
+    const bidWithDetails = await bidRepo.findByIdWithDetails(bid!.id);
 
     sendSuccessResponse(
       res, 
-      existingBid ? 200 : 201, 
-      existingBid ? "Bid updated successfully" : "Bid placed successfully", 
-      bid
+      isUpdate ? 200 : 201, 
+      isUpdate ? "Bid updated successfully" : "Bid placed successfully", 
+      bidWithDetails
     );
   } catch (error) {
     handleControllerError(error, res, "bid creation");
@@ -110,60 +98,59 @@ export const createBid = async (req: AuthRequest, res: Response) => {
 
 export const getAuctionWithBids = async (req: Request, res: Response) => {
   try {
-    const { auctionId } = req.params;
+    const { auction: auctionRepo, bid: bidRepo } = getRepo();
+    const auctionId = req.params.auctionId as string;
 
     if (!validateIdParam(auctionId, res, "auction")) return;
 
-    const auction = await Auction.findById(auctionId)
-      .populate('createdBy', 'name email')
-      .populate('cars');
+    const auction = await auctionRepo.findByIdWithDetails(auctionId);
 
     if (!auction) {
       return sendErrorResponse(res, 404, "Auction not found");
     }
 
-    const bids = await Bid.find({ auctionId })
-      .populate('userId', 'name email')
-      .populate('carId', 'VIN year msrp optimizedPrice')
-      .sort({ carId: 1, amount: -1 });
+    const bids = await bidRepo.findAll(
+      { auctionId: auctionId },
+      { page: 1, limit: 1000, skip: 0 },
+      { sortField: 'amount', sortOrder: -1 }
+    );
 
-    const carsWithBids = auction.cars.map((car: any) => {
-      const carBids = bids.filter(
-        bid => bid.carId._id.toString() === car._id.toString()
-      );
-
+    const carsWithBids = (auction.carsData || []).map((car) => {
+      const carBids = bids.data.filter(bid => bid.carId === car.id);
       const winningBid = carBids.length > 0 ? carBids[0] : null;
 
       return {
         car: {
-          _id: car._id,
+          id: car.id,
           VIN: car.VIN,
+          brand: car.brand,
+          model: car.model,
           year: car.year,
           msrp: car.msrp,
           grade: car.grade,
           optimizedPrice: car.optimizedPrice
         },
         bids: carBids.map(bid => ({
-          _id: bid._id,
+          id: bid.id,
           amount: bid.amount,
-          user: bid.userId,
+          user: bid.user,
           placedAt: bid.placedAt,
-          isWinning: winningBid ? (bid._id as any).toString() === (winningBid._id as any).toString() : false
+          isWinning: winningBid ? bid.id === winningBid.id : false
         })),
         highestBid: winningBid ? winningBid.amount : null,
-        winner: winningBid ? winningBid.userId : null,
+        winner: winningBid ? winningBid.user : null,
         totalBids: carBids.length
       };
     });
 
     sendSuccessResponse(res, 200, "Auction with bids retrieved successfully", {
       auction: {
-        _id: auction._id,
+        id: auction.id,
         name: auction.name,
         startDate: auction.startDate,
         endDate: auction.endDate,
         status: auction.status,
-        createdBy: auction.createdBy,
+        creator: auction.creator,
         totalCars: auction.cars.length
       },
       carsWithBids
@@ -175,9 +162,10 @@ export const getAuctionWithBids = async (req: Request, res: Response) => {
 
 export const getUserBids = async (req: AuthRequest, res: Response) => {
   try {
+    const { bid: bidRepo } = getRepo();
     const query = req.query as unknown as GetBidsQuery;
 
-    const filters: any = { userId: req.userId };
+    const filters: BidFilters = { userId: req.userId! };
 
     if (query.auctionId) filters.auctionId = query.auctionId;
     if (query.carId) filters.carId = query.carId;
@@ -189,21 +177,22 @@ export const getUserBids = async (req: AuthRequest, res: Response) => {
     const sortField = query.sortBy || 'placedAt';
     const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
 
-    const total = await Bid.countDocuments(filters);
-
-    const bids = await Bid.find(filters)
-      .sort({ [sortField]: sortOrder })
-      .skip(skip)
-      .limit(limit)
-      .populate('auctionId', 'name startDate endDate status')
-      .populate('carId', 'VIN year msrp optimizedPrice');
-
-    const response = createPaginatedResponse(bids, total, { page, limit, skip });
+    const result = await bidRepo.findAll(
+      filters,
+      { page, limit, skip },
+      { sortField, sortOrder }
+    );
 
     res.status(200).json({
       success: true,
       message: "User bids retrieved successfully",
-      ...response
+      data: result.data,
+      pagination: {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        totalPages: result.totalPages,
+      }
     });
   } catch (error) {
     handleControllerError(error, res, "user bids retrieval");
@@ -212,11 +201,12 @@ export const getUserBids = async (req: AuthRequest, res: Response) => {
 
 export const closeAuction = async (req: AuthRequest, res: Response) => {
   try {
-    const { auctionId } = req.params;
+    const { auction: auctionRepo, bid: bidRepo } = getRepo();
+    const auctionId = req.params.auctionId as string;
 
     if (!validateIdParam(auctionId, res, "auction")) return;
 
-    const auction = await Auction.findById(auctionId);
+    const auction = await auctionRepo.findById(auctionId);
 
     if (!auction) {
       return sendErrorResponse(res, 404, "Auction not found");
@@ -238,33 +228,28 @@ export const closeAuction = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    const allBids = await Bid.find({ auctionId });
+    const allBids = await bidRepo.findByAuction(auctionId);
 
-    await Bid.updateMany({ auctionId }, { isWinning: false });
+    await bidRepo.resetWinningForAuction(auctionId);
 
-    const carIds = [...new Set(allBids.map(bid => bid.carId.toString()))];
+    const carIds = [...new Set(allBids.map(bid => bid.carId))];
     
     const winners = [];
     for (const carId of carIds) {
-      const highestBid = await Bid.findOne({
-        auctionId,
-        carId
-      }).sort({ amount: -1 });
+      const highestBid = await bidRepo.findHighestForCar(auctionId, carId);
 
       if (highestBid) {
-        highestBid.isWinning = true;
-        await highestBid.save();
+        await bidRepo.setWinning(highestBid.id, true);
         winners.push({
           carId,
-          bidId: highestBid._id,
+          bidId: highestBid.id,
           userId: highestBid.userId,
           amount: highestBid.amount
         });
       }
     }
 
-    auction.isClosed = true;
-    await auction.save();
+    await auctionRepo.close(auctionId);
 
     sendSuccessResponse(res, 200, "Auction closed and winners determined", {
       auctionId,
