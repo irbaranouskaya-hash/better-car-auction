@@ -75,7 +75,7 @@ export const createMongoBidRepository = (): IBidRepository => ({
 
   async findByIdWithDetails(id) {
     const bid = await Bid.findById(id)
-      .populate('auctionId', 'name status')
+      .populate('auctionId', 'name startDate endDate isClosed')
       .populate('carId', 'VIN brand model year')
       .populate('userId', 'name email');
     return bid ? mapWithDetails(bid) : null;
@@ -107,7 +107,7 @@ export const createMongoBidRepository = (): IBidRepository => ({
       .sort({ [sort.sortField]: sort.sortOrder })
       .skip(pagination.skip)
       .limit(pagination.limit)
-      .populate('auctionId', 'name status')
+      .populate('auctionId', 'name startDate endDate isClosed')
       .populate('carId', 'VIN brand model year')
       .populate('userId', 'name email');
 

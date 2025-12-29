@@ -201,6 +201,7 @@ export const getUserBids = async (req: AuthRequest, res: Response) => {
 
 export const closeAuction = async (req: AuthRequest, res: Response) => {
   try {
+
     const { auction: auctionRepo, bid: bidRepo } = getRepo();
     const auctionId = req.params.auctionId as string;
 
@@ -210,14 +211,6 @@ export const closeAuction = async (req: AuthRequest, res: Response) => {
 
     if (!auction) {
       return sendErrorResponse(res, 404, "Auction not found");
-    }
-
-    if (auction.status !== 'ended') {
-      return sendErrorResponse(
-        res,
-        400,
-        "Auction must be ended before closing. Current status: " + auction.status
-      );
     }
 
     if (auction.isClosed) {
