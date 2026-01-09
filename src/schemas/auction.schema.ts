@@ -80,7 +80,10 @@ export const getAuctionsQuerySchema = z.object({
     .default('desc'),
   
   createdBy: z.string()
-    .regex(/^[0-9a-fA-F]{24}$/, "Invalid user ID format")
+    .refine(
+      (val) => /^[0-9a-fA-F]{24}$/.test(val) || /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val),
+      "Invalid user ID format"
+    )
     .optional(),
   
   search: z.string()

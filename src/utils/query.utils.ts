@@ -26,6 +26,8 @@ export const buildCarFilters = (query: any): Record<string, any> => {
 
   if (query.userId) filters.userId = query.userId;
   if (query.VIN) filters.VIN = query.VIN;
+  if (query.brand) filters.brand = { $regex: query.brand, $options: 'i' };
+  if (query.model) filters.model = { $regex: query.model, $options: 'i' };
   if (query.exteriorColor) filters.exteriorColor = query.exteriorColor;
   if (query.interiorColor) filters.interiorColor = query.interiorColor;
 

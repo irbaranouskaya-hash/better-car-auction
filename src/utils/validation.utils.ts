@@ -1,9 +1,10 @@
 import { type Response } from "express";
-import mongoose from "mongoose";
 
 
 export const isValidObjectId = (id: string): boolean => {
-  return mongoose.Types.ObjectId.isValid(id);
+  const mongoIdRegex = /^[0-9a-fA-F]{24}$/;
+  const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  return mongoIdRegex.test(id) || uuidRegex.test(id);
 };
 
 export const sendErrorResponse = (

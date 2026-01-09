@@ -1,5 +1,4 @@
 import { type Request, type Response } from "express";
-import Auction from "../models/Auction.model.js";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
 import {
   validateIdParam,
@@ -10,16 +9,18 @@ import {
 import {
   getPaginationParams,
   getSortParams,
-  createPaginatedResponse
 } from "../utils/query.utils.js";
 import type { CreateAuctionInput, UpdateAuctionInput } from "../schemas/auction.schema.js";
-import { Types } from "mongoose";
+import type { AssignCarsInput } from "../schemas/bid.schema.js";
+import { getRepo } from "../db/index.js";
+import type { AuctionFilters } from "../db/interfaces/IAuctionRepository.js";
 
 export const createAuction = async (req: AuthRequest, res: Response) => {
   try {
+    const { auction: auctionRepo } = getRepo();
     const auctionData = req.body as CreateAuctionInput;
 
-    const overlappingAuction = await Auction.findOverlapping(
+    const overlappingAuction = await auctionRepo.findOverlapping(
       auctionData.startDate,
       auctionData.endDate
     );
@@ -32,9 +33,10 @@ export const createAuction = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    const auction = await Auction.create({
+    const auction = await auctionRepo.create({
       ...auctionData,
-      createdBy: req.userId
+      createdBy: req.userId!,
+      cars: []
     });
 
     sendSuccessResponse(res, 201, "Auction created successfully", auction);
@@ -45,12 +47,12 @@ export const createAuction = async (req: AuthRequest, res: Response) => {
 
 export const getAuction = async (req: Request, res: Response) => {
   try {
+    const { auction: auctionRepo } = getRepo();
     const { id } = req.params;
 
     if (!validateIdParam(id, res, "auction")) return;
 
-    const auction = await Auction.findById(id)
-      .populate("createdBy", "name email");
+    const auction = await auctionRepo.findByIdWithDetails(id);
 
     if (!auction) {
       return sendErrorResponse(res, 404, "Auction not found");
@@ -64,26 +66,21 @@ export const getAuction = async (req: Request, res: Response) => {
 
 export const getAllAuctions = async (req: Request, res: Response) => {
   try {
-    const filters: any = {};
+    const { auction: auctionRepo } = getRepo();
+    
+    const filters: AuctionFilters = {};
 
     const status = req.query.status as string;
-    const now = new Date();
-
-    if (status === 'upcoming') {
-      filters.startDate = { $gt: now };
-    } else if (status === 'active') {
-      filters.startDate = { $lte: now };
-      filters.endDate = { $gte: now };
-    } else if (status === 'ended') {
-      filters.endDate = { $lt: now };
+    if (status && ['upcoming', 'active', 'ended', 'closed'].includes(status)) {
+      filters.status = status as AuctionFilters['status'];
     }
 
     if (req.query.createdBy) {
-      filters.createdBy = req.query.createdBy;
+      filters.createdBy = req.query.createdBy as string;
     }
 
     if (req.query.search) {
-      filters.name = { $regex: req.query.search, $options: 'i' };
+      filters.name = req.query.search as string;
     }
 
     const pagination = getPaginationParams(req.query, 10, 100);
@@ -91,20 +88,22 @@ export const getAllAuctions = async (req: Request, res: Response) => {
     const allowedSortFields = ['name', 'startDate', 'endDate', 'createdAt'];
     const { sortField, sortOrder } = getSortParams(req.query, allowedSortFields);
 
-    const total = await Auction.countDocuments(filters);
-
-    const auctions = await Auction.find(filters)
-      .sort({ [sortField]: sortOrder })
-      .skip(pagination.skip)
-      .limit(pagination.limit)
-      .populate("createdBy", "name email");
-
-    const response = createPaginatedResponse(auctions, total, pagination);
+    const result = await auctionRepo.findAll(
+      filters,
+      pagination,
+      { sortField, sortOrder }
+    );
 
     res.status(200).json({
       success: true,
       message: "Auctions retrieved successfully",
-      ...response
+      data: result.data,
+      pagination: {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        totalPages: result.totalPages,
+      }
     });
   } catch (error) {
     handleControllerError(error, res, "auctions retrieval");
@@ -113,19 +112,20 @@ export const getAllAuctions = async (req: Request, res: Response) => {
 
 export const updateAuction = async (req: AuthRequest, res: Response) => {
   try {
+    const { auction: auctionRepo } = getRepo();
     const { id } = req.params;
 
     if (!validateIdParam(id, res, "auction")) return;
 
     const updateData = req.body as UpdateAuctionInput;
 
-    const auction = await Auction.findById(id);
+    const auction = await auctionRepo.findById(id);
 
     if (!auction) {
       return sendErrorResponse(res, 404, "Auction not found");
     }
 
-    if (!auction.canBeEdited()) {
+    if (new Date() >= auction.startDate) {
       return sendErrorResponse(
         res,
         400,
@@ -137,10 +137,10 @@ export const updateAuction = async (req: AuthRequest, res: Response) => {
       const newStartDate = updateData.startDate || auction.startDate;
       const newEndDate = updateData.endDate || auction.endDate;
 
-      const overlappingAuction = await Auction.findOverlapping(
+      const overlappingAuction = await auctionRepo.findOverlapping(
         newStartDate,
         newEndDate,
-        typeof id === 'string' ? new Types.ObjectId(id) : id
+        id
       );
 
       if (overlappingAuction) {
@@ -152,10 +152,9 @@ export const updateAuction = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    Object.assign(auction, updateData);
-    await auction.save();
+    const updatedAuction = await auctionRepo.update(id, updateData);
 
-    sendSuccessResponse(res, 200, "Auction updated successfully", auction);
+    sendSuccessResponse(res, 200, "Auction updated successfully", updatedAuction);
   } catch (error) {
     handleControllerError(error, res, "auction update");
   }
@@ -163,17 +162,19 @@ export const updateAuction = async (req: AuthRequest, res: Response) => {
 
 export const deleteAuction = async (req: AuthRequest, res: Response) => {
   try {
+    const { auction: auctionRepo, bid: bidRepo } = getRepo();
     const { id } = req.params;
 
     if (!validateIdParam(id, res, "auction")) return;
 
-    const auction = await Auction.findById(id);
+    const auction = await auctionRepo.findById(id);
 
     if (!auction) {
       return sendErrorResponse(res, 404, "Auction not found");
     }
 
-    if (auction.isCurrentlyActive()) {
+    const now = new Date();
+    if (now >= auction.startDate && now <= auction.endDate) {
       return sendErrorResponse(
         res,
         400,
@@ -181,7 +182,8 @@ export const deleteAuction = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    await Auction.findByIdAndDelete(id);
+    await bidRepo.deleteByAuction(id);
+    await auctionRepo.delete(id);
 
     sendSuccessResponse(res, 200, "Auction deleted successfully", auction);
   } catch (error) {
@@ -191,19 +193,115 @@ export const deleteAuction = async (req: AuthRequest, res: Response) => {
 
 export const getCurrentAuction = async (req: Request, res: Response) => {
   try {
-    const now = new Date();
+    const { auction: auctionRepo } = getRepo();
 
-    const auction = await Auction.findOne({
-      startDate: { $lte: now },
-      endDate: { $gte: now }
-    }).populate("createdBy", "name email");
+    const result = await auctionRepo.findAll(
+      { status: 'active' },
+      { page: 1, limit: 1, skip: 0 },
+      { sortField: 'startDate', sortOrder: 1 }
+    );
 
-    if (!auction) {
+    if (result.data.length === 0) {
       return sendErrorResponse(res, 404, "No active auction at the moment");
     }
 
-    sendSuccessResponse(res, 200, "Current auction retrieved successfully", auction);
+    sendSuccessResponse(res, 200, "Current auction retrieved successfully", result.data[0]);
   } catch (error) {
     handleControllerError(error, res, "current auction retrieval");
+  }
+};
+
+export const assignCarsToAuction = async (req: AuthRequest, res: Response) => {
+  try {
+    const { auction: auctionRepo, car: carRepo } = getRepo();
+    const { auctionId } = req.params;
+    const { carIds } = req.body as AssignCarsInput;
+
+    if (!validateIdParam(auctionId, res, "auction")) return;
+
+    const auction = await auctionRepo.findById(auctionId);
+
+    if (!auction) {
+      return sendErrorResponse(res, 404, "Auction not found");
+    }
+
+    if (auction.status !== 'upcoming') {
+      return sendErrorResponse(
+        res,
+        400,
+        `Cannot assign cars to ${auction.status} auction. Only upcoming auctions can be modified.`
+      );
+    }
+
+    for (const carId of carIds) {
+      const car = await carRepo.findById(carId);
+      if (!car) {
+        return sendErrorResponse(res, 400, `Car with id ${carId} not found`);
+      }
+    }
+
+    const existingCarIds = auction.cars;
+    const newCarIds = carIds.filter(id => !existingCarIds.includes(id));
+
+    let updatedAuction = auction;
+    for (const carId of newCarIds) {
+      const result = await auctionRepo.addCar(auctionId, carId);
+      if (result) updatedAuction = result;
+    }
+
+    const auctionWithDetails = await auctionRepo.findByIdWithDetails(auctionId);
+
+    sendSuccessResponse(res, 200, "Cars assigned to auction successfully", {
+      auction: {
+        id: updatedAuction.id,
+        name: updatedAuction.name,
+        totalCars: updatedAuction.cars.length
+      },
+      newlyAssigned: newCarIds.length,
+      cars: auctionWithDetails?.carsData || []
+    });
+  } catch (error) {
+    handleControllerError(error, res, "cars assignment");
+  }
+};
+
+export const removeCarFromAuction = async (req: AuthRequest, res: Response) => {
+  try {
+    const { auction: auctionRepo, bid: bidRepo } = getRepo();
+    const { auctionId, carId } = req.params;
+
+    if (!validateIdParam(auctionId, res, "auction")) return;
+    if (!validateIdParam(carId, res, "car")) return;
+
+    const auction = await auctionRepo.findById(auctionId);
+
+    if (!auction) {
+      return sendErrorResponse(res, 404, "Auction not found");
+    }
+
+    if (auction.status !== 'upcoming') {
+      return sendErrorResponse(
+        res,
+        400,
+        `Cannot remove cars from ${auction.status} auction`
+      );
+    }
+
+    await auctionRepo.removeCar(auctionId, carId);
+
+    const bids = await bidRepo.findByAuctionAndCar(auctionId, carId);
+    for (const bid of bids) {
+      await bidRepo.delete(bid.id);
+    }
+
+    const updatedAuction = await auctionRepo.findById(auctionId);
+
+    sendSuccessResponse(res, 200, "Car removed from auction successfully", {
+      auctionId,
+      carId,
+      remainingCars: updatedAuction?.cars.length || 0
+    });
+  } catch (error) {
+    handleControllerError(error, res, "car removal");
   }
 };

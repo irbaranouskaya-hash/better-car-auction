@@ -5,9 +5,15 @@ export interface IAuctionDocument extends Document {
   startDate: Date;
   endDate: Date;
   createdBy: mongoose.Types.ObjectId;
-  isActive: boolean;
+  cars: mongoose.Types.ObjectId[];
+  isClosed: boolean;
   createdAt: Date;
   updatedAt: Date;
+
+  status: 'upcoming' | 'active' | 'ended' | 'closed';
+  durationHours: number;
+  timeUntilStart: number;
+
   isCurrentlyActive(): boolean;
   canBeEdited(): boolean;
 }
@@ -59,10 +65,16 @@ const auctionSchema = new Schema({
     required: true,
     index: true
   },
+
+  cars: [{
+    type: Schema.Types.ObjectId,
+    ref: 'Car'
+  }],
   
-  isActive: {
+  isClosed: {
     type: Boolean,
-    default: false
+    default: false,
+    index: true
   }
 }, {
   timestamps: true,
@@ -71,10 +83,14 @@ const auctionSchema = new Schema({
 });
 
 auctionSchema.index({ startDate: 1, endDate: 1 });
-auctionSchema.index({ isActive: 1, startDate: 1 });
+auctionSchema.index({ isClosed: 1, endDate: 1 });
 auctionSchema.index({ createdBy: 1, createdAt: -1 });
 
 auctionSchema.virtual('status').get(function(this: IAuctionDocument) {
+  if (this.isClosed) {
+    return 'closed';
+  }
+  
   const now = new Date();
   
   if (now < this.startDate) {
@@ -107,11 +123,6 @@ auctionSchema.methods.isCurrentlyActive = function(this: IAuctionDocument): bool
 auctionSchema.methods.canBeEdited = function(this: IAuctionDocument): boolean {
   return new Date() < this.startDate;
 };
-
-auctionSchema.pre('save', function(this: IAuctionDocument, next) {
-  this.isActive = auctionSchema.methods.isCurrentlyActive.call(this);
-  next();
-});
 
 auctionSchema.statics.findOverlapping = function(
   startDate: Date, 
