@@ -58,7 +58,10 @@ export const updateCarSchema = createCarSchema.partial()
 
 export const getCarsQuerySchema = z.object({
   userId: z.string()
-    .regex(/^[0-9a-fA-F]{24}$/, "Invalid user ID format")
+  .refine(
+    (val) => /^[0-9a-fA-F]{24}$/.test(val) || /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val),
+    "Invalid user ID format (must be MongoDB ObjectId or UUID)"
+  )
     .optional(),
     
   VIN: z.string()

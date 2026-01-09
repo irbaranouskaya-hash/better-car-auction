@@ -1,8 +1,12 @@
 import { z } from 'zod';
 
+const idSchema = z.string().refine(
+  (val) => /^[0-9a-fA-F]{24}$/.test(val) || /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val),
+  "Invalid ID format"
+);
+
 export const createBidSchema = z.object({
-  carId: z.string()
-    .regex(/^[0-9a-fA-F]{24}$/, "Invalid car ID format"),
+  carId: idSchema,
   
   amount: z.number()
     .int("Bid amount must be an integer")
@@ -12,25 +16,17 @@ export const createBidSchema = z.object({
 });
 
 export const assignCarsSchema = z.object({
-  carIds: z.array(
-    z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid car ID format")
-  )
+  carIds: z.array(idSchema)
   .min(1, "At least one car must be assigned")
   .max(100, "Cannot assign more than 100 cars at once")
 });
 
 export const getBidsQuerySchema = z.object({
-  auctionId: z.string()
-    .regex(/^[0-9a-fA-F]{24}$/, "Invalid auction ID format")
-    .optional(),
+  auctionId: idSchema.optional(),
   
-  carId: z.string()
-    .regex(/^[0-9a-fA-F]{24}$/, "Invalid car ID format")
-    .optional(),
+  carId: idSchema.optional(),
   
-  userId: z.string()
-    .regex(/^[0-9a-fA-F]{24}$/, "Invalid user ID format")
-    .optional(),
+  userId: idSchema.optional(),
   
   page: z.string()
     .optional()

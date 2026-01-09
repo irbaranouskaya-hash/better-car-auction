@@ -13,6 +13,7 @@ export interface Repositories {
 
 let repositories: Repositories | null = null;
 let isInitialized = false;
+let currentDbType: 'mongodb' | 'postgresql' | null = null;
 
 export const initDatabase = async (): Promise<void> => {
   if (isInitialized) {
@@ -22,26 +23,42 @@ export const initDatabase = async (): Promise<void> => {
   const dbType = config.dbType;
 
   if (dbType === 'postgresql') {
-    throw new Error('PostgreSQL is not yet implemented. Please use mongodb.');
+    const {
+      connectPostgres,
+      createPostgresUserRepository,
+      createPostgresCarRepository,
+      createPostgresAuctionRepository,
+      createPostgresBidRepository,
+    } = await import('./postgresql/index.js');
+
+    await connectPostgres();
+
+    repositories = {
+      user: createPostgresUserRepository(),
+      car: createPostgresCarRepository(),
+      auction: createPostgresAuctionRepository(),
+      bid: createPostgresBidRepository(),
+    };
+  } else {
+    const {
+      connectMongo,
+      createMongoUserRepository,
+      createMongoCarRepository,
+      createMongoAuctionRepository,
+      createMongoBidRepository,
+    } = await import('./mongodb/index.js');
+
+    await connectMongo();
+
+    repositories = {
+      user: createMongoUserRepository(),
+      car: createMongoCarRepository(),
+      auction: createMongoAuctionRepository(),
+      bid: createMongoBidRepository(),
+    };
   }
 
-  const {
-    connectMongo,
-    createMongoUserRepository,
-    createMongoCarRepository,
-    createMongoAuctionRepository,
-    createMongoBidRepository,
-  } = await import('./mongodb/index.js');
-
-  await connectMongo();
-
-  repositories = {
-    user: createMongoUserRepository(),
-    car: createMongoCarRepository(),
-    auction: createMongoAuctionRepository(),
-    bid: createMongoBidRepository(),
-  };
-
+  currentDbType = dbType;
   isInitialized = true;
   console.log(`Database initialized: ${dbType}`);
 };
@@ -60,15 +77,17 @@ export const disconnectDatabase = async (): Promise<void> => {
     return;
   }
 
-  const dbType = config.dbType;
-
-  if (dbType === 'mongodb') {
+  if (currentDbType === 'mongodb') {
     const { disconnectMongo } = await import('./mongodb/index.js');
     await disconnectMongo();
+  } else if (currentDbType === 'postgresql') {
+    const { disconnectPostgres } = await import('./postgresql/index.js');
+    await disconnectPostgres();
   }
 
   repositories = null;
   isInitialized = false;
+  currentDbType = null;
 };
 
 export * from './interfaces/index.js';

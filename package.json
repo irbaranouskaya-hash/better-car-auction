@@ -7,6 +7,8 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
+    "dev:mongo": "cross-env DB_TYPE=mongodb tsx watch src/index.ts",
+    "dev:postgres": "cross-env DB_TYPE=postgresql tsx watch src/index.ts",
     "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1",
     "create-admin": "tsx src/scripts/createAdmin.ts",
@@ -15,18 +17,23 @@
     "migrate-auctions": "tsx src/scripts/migrateAuctions.ts",
     "migrate-cars": "tsx src/scripts/migrateCars.ts",
     "test-expired-auction": "tsx src/scripts/createTestExpiredAuction.ts",
-    "test-active-auction": "tsx src/scripts/createTestActiveAuction.ts"
+    "test-active-auction": "tsx src/scripts/createTestActiveAuction.ts",
+    "db:migrate": "tsx src/scripts/migrate.ts",
+    "db:migrate:status": "tsx src/scripts/migrate.ts status"
   },
   "author": "Iryna Baranouskaya",
   "license": "ISC",
   "dependencies": {
+    "@types/pg": "^8.16.0",
     "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.20.0",
     "mongoose": "^8.18.3",
+    "pg": "^8.16.3",
     "redis": "^5.9.0",
     "zod": "^4.1.12"
   },
@@ -36,6 +43,7 @@
     "@types/express": "^5.0.3",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.6.0",
+    "cross-env": "^10.1.0",
     "ts-node": "^10.9.2",
     "tsx": "^4.20.6",
     "typescript": "^5.9.2"
